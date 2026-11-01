@@ -22,6 +22,7 @@ public final class RadioView extends View {
     private final Radio radio;
     private final Panel[] panels;
     private final RectF[] tabR;
+    private float tabX0, tabW2;
     private final RectF topBar = new RectF();
     private final RectF content = new RectF();
     private final SparseArray<Panel> owners = new SparseArray<Panel>();
@@ -150,7 +151,7 @@ public final class RadioView extends View {
     /** 原生页全屏模式：整个屏幕只显示 libetx.so 的 480x272 画面 */
     public static final int IDX_NATIVE = 0;
     private static final int OPEN_COUNT = 8;
-    private boolean full;
+    private boolean full;   // 全屏（只在本进程内有效，不持久化）
     private final RectF exitR = new RectF();
     /** 全屏时的「复位」按钮：原生核心卡死（如 Lua 报错页）时的逃生口。 */
     private final RectF resetR = new RectF();
@@ -200,6 +201,10 @@ public final class RadioView extends View {
         }
         tabW = Math.min(ui.d(92), (w - ui.d(392)) / panels.length);
         float x0 = ui.d(150);
+        tabX0 = x0; tabW2 = tabW;
+        android.util.Log.i("ETX-UI", "geom view=" + w + "x" + h + " dens="
+                + getResources().getDisplayMetrics().density
+                + " tabW=" + tabW + " x0=" + x0 + " topH=" + topH);
         for (int i = 0; i < panels.length; i++) {
             tabR[i].set(x0 + i * tabW, ui.d(6), x0 + (i + 1) * tabW - ui.d(6), topH - ui.d(6));
         }
@@ -311,6 +316,11 @@ public final class RadioView extends View {
         invalidate();
     }
 
+    /** 测试钩子：按索引切页（绕开坐标换算）。 */
+    public void setPageForTest(int i) {
+        if (i >= 0 && i < panels.length) { page = i; invalidate(); }
+    }
+
     private int indexOf(Panel pn) {
         for (int i = 0; i < panels.length; i++) if (panels[i] == pn) return i;
         return 0;
@@ -397,13 +407,15 @@ public final class RadioView extends View {
                 }
                 if (Ui.in(fullR, x, y)) { setFullNative(true); invalidate(); return true; }
                 if (y <= topH) {
+                    // 命中判定改成「离哪个页签中心最近」：不同密度/宽度下矩形可能
+                    // 与视觉位置有偏差，按最近中心点选取，手指点哪儿就是哪儿。
+                    int best = -1;
+                    float bestD = Float.MAX_VALUE;
                     for (int i = 0; i < tabR.length; i++) {
-                        if (Ui.in(tabR[i], x, y)) {
-                            page = i;
-                            invalidate();
-                            break;
-                        }
+                        float d = Math.abs(tabR[i].centerX() - x);
+                        if (d < bestD) { bestD = d; best = i; }
                     }
+                    if (best >= 0) { page = best; invalidate(); }
                     return true;
                 }
                 downId = id;

@@ -45,7 +45,9 @@ public class NativePanel extends Panel {
     /** 实例值的静态镜像，供 MainActivity 读 */
     public static volatile long lastLatencyMs = -1;
     /** 是否强制整屏重绘（可切换做 A/B） */
-    public static boolean FORCE_FULL = true;
+    /** 是否允许进入原生全屏。默认关：以前默认开，导致每 120 帧自动弹进全屏，
+     *  用户看到的「点不出去 / 一直卡在全屏」就是它。只有点「全屏」按钮才进。 */
+    public static boolean FORCE_FULL = false;
 
     /**
      * 原生触摸开关。
@@ -202,7 +204,7 @@ public class NativePanel extends Panel {
             int newFrame = EtxNative.tick(elapsed);
             long t1 = System.nanoTime();
             // 首帧不走 full：必须先有至少一次 tick 让 LVGL 建立刷新状态，否则 lv_obj_invalidate(NULL) 会崩
-            boolean wantFull = FORCE_FULL && frames > 0 && (fullPending || (frames % 120 == 0));
+            boolean wantFull = FORCE_FULL && frames > 0 && fullPending;
             if (wantFull) {
                 first = false;
                 fullPending = false;

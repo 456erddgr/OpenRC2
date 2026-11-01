@@ -66,11 +66,11 @@ public class MainActivity extends Activity implements Host {
         if (bs != null) radio.vbatMv = bs.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
         Log.i("ETX-Main", "vbat=" + radio.vbatMv + "mV");
         view = new RadioView(this, radio, this);
-        // 开机直接进"原版 EdgeTX 全屏"：这才是用户要的那个系统；
-        // 顶栏/页签仍在，点右上角"退出全屏"就回到七页签视图。
+        // 开机进七页签视图（不再自动全屏）：以前这里强制全屏，用户看到的就是
+        // “进去出不来、页签/设置点不到”。想看原版 EdgeTX 就点右上角「全屏」。
         initUsbWatcher();
-        view.setPage(0);
-        view.setFullNative(true);
+        view.setFullNative(false);
+        view.setPage(0);           // 0 = 原生页（EdgeTX 实时画面）
         setContentView(view, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         try {
@@ -103,6 +103,13 @@ public class MainActivity extends Activity implements Host {
                 h.postDelayed(this, 15000);
             }
         }, 15000);
+    }
+
+    @Override
+    public void onBackPressed() {
+        // 全屏原生画面时，返回键先退出全屏，避免「进了全屏出不来」
+        if (view != null && view.isFull()) { view.setFullNative(false); return; }
+        super.onBackPressed();
     }
 
     @Override
@@ -343,6 +350,28 @@ public class MainActivity extends Activity implements Host {
             com.rc2.etx.ui.NativePanel.FORCE_FULL = i.getIntExtra("on", 1) != 0;
             Log.i(TAG, "FORCE_FULL=" + com.rc2.etx.ui.NativePanel.FORCE_FULL);
             toast("整屏重绘 " + (com.rc2.etx.ui.NativePanel.FORCE_FULL ? "开" : "关"));
+        } else if ("tab".equals(act)) {
+            if (view != null) { view.setFullNative(false); view.setPageForTest(i.getIntExtra("i", 0)); }
+        } else if ("vtap".equals(act)) {
+            // 把合成点击派发到 RadioView 自己（页签/卡片/按钮），
+            // 与 "touch" 不同：后者只进 libetx 原生画面。
+            final float vx = i.getIntExtra("tx", 0), vy = i.getIntExtra("ty", 0);
+            if (view != null) view.setFullNative(false);
+            final long t0 = android.os.SystemClock.uptimeMillis();
+            view.post(new Runnable() { public void run() {
+                android.view.MotionEvent d = android.view.MotionEvent.obtain(
+                        t0, t0, android.view.MotionEvent.ACTION_DOWN, vx, vy, 0);
+                view.dispatchTouchEvent(d);
+                d.recycle();
+                view.postDelayed(new Runnable() { public void run() {
+                    long t1 = android.os.SystemClock.uptimeMillis();
+                    android.view.MotionEvent u = android.view.MotionEvent.obtain(
+                            t0, t1, android.view.MotionEvent.ACTION_UP, vx, vy, 0);
+                    view.dispatchTouchEvent(u);
+                    u.recycle();
+                    Log.i(TAG, "vtap " + vx + "," + vy);
+                } }, 60);
+            } });
         } else if ("touch".equals(act)) {
             // 可复现的触摸注入钩子：本 ROM 上 `adb shell input tap` 经常被吞掉
             // （getevent 抓不到内核事件），所以提供一条确定能到 libetx 的路。
