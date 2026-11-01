@@ -356,7 +356,9 @@ public final class Radio {
         if (!avail && model == 2) {          // 明确选了 RC Pro 但服务没就绪：仍然起，靠重试
             android.util.Log.w(TAG, "型号设置=RC Pro，但 protocol 服务暂不可见，稍后重试");
         }
-        if (!avail && model != 2) return;
+        // 自动/RC2 也启用 binder：RC2 上同样有 com.dji.protocol.IProtocolManager，
+        // 断连空档要靠它补帧；只有「服务真的不可见且用户没强指 RC Pro」时才放弃。
+        if (!avail && model == 1) return;
         rcpro = new com.rc2.etx.input.RcProStick();
         rcpro.start(ctx);
         Log.i(TAG, "检测到 DJI protocol 服务 → 摇杆改走 binder (RC Pro 模式)");
