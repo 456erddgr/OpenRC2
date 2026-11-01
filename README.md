@@ -5,6 +5,10 @@
 
 这不是"仿 EdgeTX 界面"的壳子。`libetx.so` 是把 EdgeTX 的 `radio/src` 交叉编译出来的**原版内核**：混控、通道、模型管理、校诊、主题、Lua 全是上游代码，我们只写了板级 HAL 和一层 JNI 桥。
 
+![真机](docs/img/00-hardware.jpg)
+
+_真机：DJI RC2（已 root），屏幕上跑的就是这个 App —— 左侧状态栏、EdgeTX 原生主屏、左右八颗屏幕键、「退出全屏 / 复位」两个逃生键。_
+
 ![主界面](docs/img/01-home.png)
 
 ---
