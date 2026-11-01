@@ -59,7 +59,7 @@ if [ $HAVE_V7 = 1 ] || [ $HAVE_64 = 1 ]; then
   TARGET="$PROJ\dist\_base-$VER.apk"
 fi
 
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$SDK\build-apk.ps1" -Root "$PROJ\app" -Out "$TARGET" -MinApi 29 | tail -6
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$SDK\build-apk.ps1" -Root "$PROJ\app" -Out "$TARGET" -MinApi 29 -Version "$VER" | tail -6
 
 if [ $HAVE_V7 = 1 ] || [ $HAVE_64 = 1 ]; then
   echo "[+] 注入 .so (v7=$HAVE_V7 v8a=$HAVE_64)"
