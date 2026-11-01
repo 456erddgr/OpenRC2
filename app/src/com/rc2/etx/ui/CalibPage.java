@@ -38,6 +38,7 @@ public class CalibPage extends Panel {
     private final RectF btnA = new RectF(), btnB = new RectF();
     private final double[] cenSum = new double[10];
     private int cenN;
+    private float[] testRaw;   // 仅测试：合成摇杆数据
     private String hint = "点「开始校准」";
 
     public CalibPage(Radio r) { super(r); }
@@ -55,7 +56,7 @@ public class CalibPage extends Panel {
     public void cancel() { running = false; hint = "已取消"; }
 
     private float ax(int a) {
-        float v = radio.calib.raw[a];
+        float v = testRaw != null ? testRaw[a] : radio.calib.raw[a];
         return v > 1f ? 1f : (v < -1f ? -1f : v);
     }
 
@@ -130,6 +131,10 @@ public class CalibPage extends Panel {
         finish();
     }
 
+
+    /** 仅测试：注入合成摇杆值，用来驱动 0..9 状态机截图验证。 */
+    public void setTestRaw(float[] v) { testRaw = v; }
+
     private void finish() {
         Calib c = radio.calib;
         for (int s = 0; s < 4; s++) {
@@ -149,7 +154,7 @@ public class CalibPage extends Panel {
         for (int s = 0; s < 4; s++) {
             int a = bind[s];
             if (a < 0 || a > 3) continue;
-            radio.duml.shrinkSpan(mcu[a], Math.max(0.30f, peak[s]));
+            radio.duml.scaleSpanToPeak(mcu[a], Math.max(0.55f, peak[s]));
         }
         radio.input.reset();
         radio.save();

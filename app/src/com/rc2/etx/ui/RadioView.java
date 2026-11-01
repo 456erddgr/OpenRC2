@@ -280,6 +280,23 @@ public final class RadioView extends View {
         p.setStyle(Paint.Style.FILL);
     }
 
+    /** adb 钩子：注入合成摇杆值 drive 状态机（测试用）。 */
+    public void debugCalibSim(int phase) {
+        for (Panel pn : panels)
+            if (pn instanceof CalibPage) {
+                CalibPage cp = (CalibPage) pn;
+                setPage(indexOf(pn));
+                float[] v = new float[10];
+                if (phase == 1) { v[1] = 0.60f; }                       // 推 LY 认油门
+                else if (phase == 2) { v[0]=0.95f; v[1]=0.95f; v[2]=0.95f; v[3]=0.95f; }
+                else if (phase == 3) { /* 全回中 */ }
+                cp.setTestRaw(v);
+                if (phase == 0) cp.begin();
+                break;
+            }
+        invalidate();
+    }
+
     /** adb 钩子：直接开始推杆校准。 */
     /** adb 钩子：强制完成一次校准（测试同步用）。 */
     public void debugCalibForce(float m) {

@@ -463,6 +463,8 @@ public class MainActivity extends Activity implements Host {
             Log.i(TAG, "K5-REPORT " + rep);
             writeReport("crosscheck.txt", rep);
             toast("K5 交叉校验已写入 crosscheck.txt");
+        } else if ("calibsim".equals(act)) {
+            if (view != null) view.debugCalibSim(i.getIntExtra("p", 0));
         } else if ("calibforce".equals(act)) {
             float mm = i.getFloatExtra("m", 0.85f);
             if (view != null) view.debugCalibForce(mm);

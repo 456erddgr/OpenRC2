@@ -406,6 +406,18 @@ public final class DumlStick {
 
 
     /** 按实测峰值缩小某轴行程：让"用户实际能推到的位置"成为新的满行程。 */
+    /**
+     * 把某轴行程缩放到“实测峰值”：peak 是本次校准中该轴达到的最大归一化幅值(0..1)。
+     * 校准后 raw 的 ±peak 会映射成 ±1，即推到手感极限就是 100%——
+     * 解决 RC Pro 这类物理行程偏小的机器“推满也不到 100%”。
+     */
+    public void scaleSpanToPeak(int axis, float peak) {
+        if (axisNeg == null || axisPos == null || peak <= 0.05f) return;
+        float k = Math.min(1f, peak);
+        axisNeg[axis] = Math.max(60, Math.round(axisNeg[axis] * k));
+        axisPos[axis] = Math.max(60, Math.round(axisPos[axis] * k));
+    }
+
     public void shrinkSpan(int axis, float factor) {
         if (axis < 0 || axis >= AXES || factor <= 0f || factor >= 1.5f) return;
         if (axisNeg == null || axisPos == null) return;
