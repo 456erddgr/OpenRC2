@@ -72,6 +72,8 @@ public final class Radio {
 
     // 统计
     public volatile long ticks;
+    /** 最近一次用 binder 补帧的时间（独立于 TCP 的 lastStickMs）。 */
+    public volatile long lastBinderMs;
     public volatile int hz;
     private long hzFrom;
     private int hzCount;
@@ -359,6 +361,10 @@ public final class Radio {
         // 自动/RC2 也启用 binder：RC2 上同样有 com.dji.protocol.IProtocolManager，
         // 断连空档要靠它补帧；只有「服务真的不可见且用户没强指 RC Pro」时才放弃。
         if (!avail && model == 1) return;
+        // 防止重复启动：构造函数和 setDumlOn() 都会调到这里，
+        // 以前会起两条桥线程 + 两个 RcProStick，等于双份 transact(4) 抢 binder。
+        if (rcBridge != null && rcBridge.isAlive()) return;
+        if (rcpro != null && rcpro.connected) return;
         rcpro = new com.rc2.etx.input.RcProStick();
         rcpro.start(ctx);
         Log.i(TAG, "检测到 DJI protocol 服务 → 摇杆改走 binder (RC Pro 模式)");
@@ -382,9 +388,11 @@ public final class Radio {
                                         int n = Math.min(6, Math.min(v.length, d.length));
                                         for (int i = 0; i < n; i++) d[i] = v[i];
                                     }
-                                    duml.connected = true;
-                                    duml.stickFrames = r.frames;
-                                    duml.lastStickMs = now2;
+                                    // 注意：不能写 duml.connected / duml.lastStickMs，
+                                    // 否则下一轮会被误判成 "TCP 新鲜"，binder 立刻停手，
+                                    // 而且状态栏会显示已连接（实际是断的）。
+                                    lastBinderMs = now2;
+                                    if (duml.stickFrames == 0) duml.stickFrames = r.frames;
                                     gapFills++;
                                     if (gapFills <= 3 || gapFills % 500 == 0) {
                                         Log.i(TAG, "binder 补帧 #" + gapFills);
