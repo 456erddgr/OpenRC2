@@ -68,8 +68,39 @@ public final class RadioView extends View {
                 new MixPanel(r),
                 new OutputPanel(r, c, host),
                 new CalibPanel(r),
-                new DiagPanel(r, c, host)
+                new DiagPanel(r, c, host),
+                new SetPage(r)
         };
+        if (panels.length > 6 && panels[6] instanceof SetPage) {
+            final SetPage sp = (SetPage) panels[6];
+            sp.setOnCard(new SetPage.OnCard() {
+                public void onCard(int idx) {
+                    if (idx == SetPage.C_MODEL) {
+                        int m = (com.rc2.etx.radio.Store.loadModel(getContext()) + 1) % 3;
+                        com.rc2.etx.radio.Store.saveModel(getContext(), m);
+                        sp.setValue(SetPage.C_MODEL, com.rc2.etx.radio.Store.modelName(m));
+                        if (host != null) host.toast("型号已切换为 " + com.rc2.etx.radio.Store.modelName(m));
+                    } else if (idx == SetPage.C_THEME) {
+                        String now = com.rc2.etx.sd.ThemePick.next(getContext());
+                        sp.setValue(SetPage.C_THEME, now);
+                        if (host != null) host.toast("主题已改为 " + now + "，正在重启内核");
+                        if (nativePanelRef != null) nativePanelRef.restartCore();
+                    } else if (idx == SetPage.C_CAL) {
+                        if (panels.length > 4 && panels[4] instanceof CalibPanel) {
+                            ((CalibPanel) panels[4]).begin();
+                            sp.setValue(SetPage.C_CAL, "校准中");
+                        }
+                        setPage(4);
+                    } else if (idx == SetPage.C_EXPORT) {
+                        if (host != null) host.toast("请到「诊断」页点「保存诊断」导出");
+                        setPage(5);
+                    }
+                    invalidate();
+                }
+            });
+            sp.setValue(SetPage.C_MODEL, com.rc2.etx.radio.Store.modelName(
+                    com.rc2.etx.radio.Store.loadModel(getContext())));
+        }
         if (panels.length > IDX_NATIVE && panels[IDX_NATIVE] instanceof NativePanel) {
             nativePanelRef = (NativePanel) panels[IDX_NATIVE];
         }
