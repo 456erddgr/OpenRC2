@@ -20,7 +20,9 @@ public final class StickSmooth {
     /** 外推增益：1.0 = 完全线性外推，0.0 = 不外推。0.8 折中。 */
     /** 外推增益。0 = 纯粹在上一帧与本帧之间插值（不过冲）。
      *  以前 0.8 会把"本帧 - 上帧"再多推 80%，新样本一到就猛地弹回 —— 这就是"抽搐"。 */
-    private static final float EXTRA_GAIN = 0f;
+    private static final float EXTRA_GAIN = 0.35f;
+    /** 外推窗口：样本到达后只在这个时间内外推，超过就锁住当前值（防过冲）。 */
+    private static final float EXTRAP_WINDOW_MS = 40f;
     /** 速度死区：两次样本差小于这个值就当作没动，防止手抖被放大。 */
     private static final float VEL_DEAD = 0.012f;
 
@@ -61,10 +63,13 @@ public final class StickSmooth {
         // 旧写法 `cur + d*k` 会越过 cur，等下一帧反向时就是肉眼可见的抖动。
         float k = dt / interval;
         if (k > 1f) k = 1f;
+        // 40ms 内做有限外推：采样只有 ~10Hz，这一段把"跳一格"变成"连续滑"。
+        float ex = 0f;
+        if (dt > 0f && dt <= EXTRAP_WINDOW_MS) ex = (dt / interval) * EXTRA_GAIN;
         for (int i = 0; i < N; i++) {
             float d = cur[i] - prev[i];
             if (d < VEL_DEAD && d > -VEL_DEAD) d = 0f;
-            float v = prev[i] + d * k;
+            float v = prev[i] + d * k + d * ex;
             if (v > 1f) v = 1f;
             else if (v < -1f) v = -1f;
             out[i] = v;

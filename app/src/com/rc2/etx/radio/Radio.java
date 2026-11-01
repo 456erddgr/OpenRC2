@@ -248,7 +248,7 @@ public final class Radio {
     // asymmetric radio.yml window (RH 1044 / RV 929 / ...) is NOT used here.
     /** 中位死区（DJI 原始 ADC 单位，约 2% 行程）：静止时把零漂直接吸到中点，
      *  否则通道会在 965~992us 之间来回飘（用户说的"漂移"）。 */
-    private static final int DJI_CENTER_DEAD = 22;
+    private static final int DJI_CENTER_DEAD = 4;
 
     private int djiToEtxAdc(int djiRaw) {
         if (Math.abs(djiRaw - 1024) <= DJI_CENTER_DEAD) return 1024;
