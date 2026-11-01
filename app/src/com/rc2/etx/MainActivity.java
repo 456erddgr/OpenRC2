@@ -463,6 +463,9 @@ public class MainActivity extends Activity implements Host {
             Log.i(TAG, "K5-REPORT " + rep);
             writeReport("crosscheck.txt", rep);
             toast("K5 交叉校验已写入 crosscheck.txt");
+        } else if ("calibforce".equals(act)) {
+            float mm = i.getFloatExtra("m", 0.85f);
+            if (view != null) view.debugCalibForce(mm);
         } else if ("full".equals(act)) {
             final boolean on = i.getIntExtra("on", 0) != 0;
             view.post(new Runnable() { public void run() { view.setFullNative(on); } });

@@ -107,6 +107,14 @@ public final class Radio {
             duml.setAxisSpans(m, ng, ps);
         }
         input.calib = calib;
+        // 校准结果在每次启动都要重新落到 raw 行程上，否则重启即失效
+        if (calib.enabled) {
+            int[] mcuCh = {3, 2, 0, 1};        // calib 轴 LX/LY/RX/RY -> MCU LH/LV/RH/RV
+            for (int a = 0; a < 4; a++) {
+                float m = calib.max[a];
+                if (m > 0.3f && m < 1.5f) duml.shrinkSpan(mcuCh[a], m);
+            }
+        }
         mixer.setConfig(model.ch);
         input.reset();
         dumlOn = Store.loadDumlOn(c);

@@ -127,3 +127,45 @@ ETX_SO=/path/to/libetx.so ./scripts/build-apk.sh 1.23.0
 - [ ] 可视化设置页（型号/主题/校准/导出 四张卡片）
 - [ ] 脚本页入口、模型格空白
 - [ ] aarch64 构建
+
+## 校准（v2，1.25.x 起）
+
+校准页为**独立重写实现**（`app/src/com/rc2/etx/ui/CalibPage.java`），不再沿用旧 `CalibPanel`。
+
+流程：
+
+1. **采中点（0.9 s）**：静置，记录 10 根轴基准；
+2. **认轴**：推一下哪根杆就自动绑定哪根（油门→副翼→俯仰→偏航），不需要手动选反向；
+3. **转圈采满**：两根摇杆各转几圈，逐轴记录**实测峰值**，每根轴累计 ≥2 次 ≥0.90 即通过；
+4. **回中（1.5 s）**：四根全部回中并保持，取**该窗口平均值**作为最终中点；
+5. **落盘并同步**：`calib.min/max` 用实测峰值（下限 0.55 防止饱和成 ±100%），
+   写 `Store.saveCalib` → `radio.save()`；同时 `DumlStick.shrinkSpan()` 把原始行程按峰值缩小，
+   `input.reset()` 让 EdgeTX 立刻生效。
+
+关键设计：**100% 由你实际推到的位置决定**，而不是写死 ±1.0。这样 RC Pro 这类行程偏小的机器推到底也能显示 100%。
+
+## 已知问题：RC2 摇杆数据链路约每 6 秒被 `dji_link` 重置
+
+现象：`connected → 收 2 帧 → Connection reset`，约 6 秒一次；界面上表现为“拨一会儿卡一下”。
+
+已排除：
+
+- **不是大疆模拟器抢连接**：`ps`/`ss` 确认当时只有 `com.rc2.etx` 一个客户端；
+- **不是心跳缺失**：抓包（`re/now.pcap` 312 帧、`re/long.pcap` 1557 帧）证明**服务端从不发心跳**，
+  只有客户端每 ~30 ms 主动发 `01 01 08 0a | u32 t | u32 t`；我们已按此实现，
+  但 A/B 测试显示“发 / 不发心跳都会 6 秒断”；
+- **不是时钟域**：`t` 改成 `SystemClock.elapsedRealtime()`（与服务端同域）后行为不变。
+
+当前最强线索：服务端 socket 的 `Recv-Q` 持续堆积（实测 84 字节 = 7 帧心跳未读），
+`dji_link` **不消费**我们发出的任何字节就 RST —— 说明这条 40007 连接在它看来只是
+“已订阅的数据通道”，而**订阅/注册**动作发生在我们尚未定位的另一条连接或 Binder 上。
+
+影响面：只影响手感连贯性（`StickSmooth` 有断线桥接，不会乱跳），不影响通道数值正确性。
+
+## 蓝牙 HID 手柄：本机不可行（结论）
+
+`dumpsys bluetooth_manager` 的 profile 列表只有 `HidHostService`（收），**没有 `HidDeviceService`（发）**；
+`pm list features` 也没有 hid 相关特性。因此 `BluetoothHidDevice.registerApp()` 无法注册，
+装 priv-app 授 `BLUETOOTH_PRIVILEGED` 同样无效 —— 需要替换系统蓝牙栈（BlueZ/Bumble 走 HCI 直通），不在本项目范围。
+
+USB HID 手柄（`/dev/hidg0`）不受影响，仍是模拟器首选方案。

@@ -67,7 +67,7 @@ public final class RadioView extends View {
                 new ChannelPanel(r),
                 new MixPanel(r),
                 new OutputPanel(r, c, host),
-                new CalibPanel(r),
+                new CalibPage(r),
                 new DiagPanel(r, c, host),
                 new SetPage(r)
         };
@@ -86,8 +86,8 @@ public final class RadioView extends View {
                         if (host != null) host.toast("主题已改为 " + now + "，正在重启内核");
                         if (nativePanelRef != null) nativePanelRef.restartCore();
                     } else if (idx == SetPage.C_CAL) {
-                        if (panels.length > 4 && panels[4] instanceof CalibPanel) {
-                            ((CalibPanel) panels[4]).begin();
+                        if (panels.length > 4 && panels[4] instanceof CalibPage) {
+                            ((CalibPage) panels[4]).begin();
                             sp.setValue(SetPage.C_CAL, "校准中");
                         }
                         setPage(4);
@@ -281,9 +281,16 @@ public final class RadioView extends View {
     }
 
     /** adb 钩子：直接开始推杆校准。 */
+    /** adb 钩子：强制完成一次校准（测试同步用）。 */
+    public void debugCalibForce(float m) {
+        for (Panel pn : panels)
+            if (pn instanceof CalibPage) { setPage(indexOf(pn)); ((CalibPage) pn).forceFinishForTest(m); break; }
+        invalidate();
+    }
+
     public void debugBeginCalib() {
         for (Panel pn : panels)
-            if (pn instanceof CalibPanel) { setPage(indexOf(pn)); ((CalibPanel) pn).begin(); break; }
+            if (pn instanceof CalibPage) { setPage(indexOf(pn)); ((CalibPage) pn).begin(); break; }
         invalidate();
     }
 

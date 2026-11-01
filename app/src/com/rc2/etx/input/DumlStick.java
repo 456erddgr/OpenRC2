@@ -242,7 +242,6 @@ public final class DumlStick {
             if ((b[i] & 0xFF) == 0x01 && (b[i + 1] & 0xFF) == 0x01
                     && (b[i + 2] & 0xFF) == 0x08 && (b[i + 3] & 0xFF) == 0x0A) {
                 if (len - i < 12) break;
-                onServerHeartbeat(b);
                 i += 12;
                 continue;
             }
@@ -372,79 +371,29 @@ public final class DumlStick {
     private volatile int srvLastA;
     /** 我们自己上一拍发出的心跳 X。 */
     private volatile int hbPrevX;
-    /** 收到 srvLastA 的墙钟时刻。 */
-    private volatile long srvLastAt;
-    private volatile int srvA0;
-    private volatile long srvT0;
 
     /**
-     * 生成回显心跳：01 01 08 0a | B | B-Δ
-     * 其中 (A,B) 是服务端最近发来的那一对，Δ = A-B（服务端用的间隔）。
-     * 还没有收到过服务端心跳时，退回用本地计时器（只影响连接刚建立的头几百毫秒）。
+     * 心跳：01 01 08 0a | u32 t | u32 t（共 12 字节，A == B，t 单调递增 ms）。
+     *
+     * 抓包实证（re/now.pcap 312 个客户端包、re/long.pcap 1557 个）：
+     *   - 服务端**从来不**发心跳帧；只有客户端每 ~30ms 主动发一次；
+     *   - 两端数值相同，且随时间单调增长（差值 31~51，即毫秒）。
+     * 旧实现等“服务端心跳”再回显 → 服务端不发，于是我们一帧都不发，
+     * dji_link 判定客户端沉默，约 4 秒把连接 reset（这就是 RC2 老是断连的根因）。
      */
     private byte[] nextHeartbeat() {
-        // 心跳协议（抓包实测，re/simlong.pcap 大疆模拟器 70s + re/long.pcap 我们的 App）：
-        //   服务端 → 客户端：01 01 08 0a | S_now | S_prev      (S = 服务端时钟，两边同源)
-        //   客户端 → 服务端：01 01 08 0a | C_now | S_last
-        // 关键两条：
-        //  1) 第二个字段 Y 必须**回显服务端最近一次心跳的 A**（S_last），这是往返校验；
-        //     我们之前发 (X,X) 或 (X,我们的上一拍) 都过不了 → 服务端 RST 掐连接。
-        //  2) 第一个字段 X 必须落在**服务端的时钟域**里（与服务端当前时间同量级、同速率）。
-        //     我们之前用本地 epoch（500000000+elapsed）→ 差 3.5M → 服务端不认 → 25s 空闲超时。
-        // 所以：收到服务端第一个心跳时记下 S 和墙钟，之后 X = S + 经过的墙钟毫秒，Y = S_last。
-        if (!srvSeen) return null;
-        long now = System.currentTimeMillis();
-        // X 必须是"客户端自己的时钟"，而且速率要正确：
-        //   用**第一个**收到的服务端 A 作为基准 + 从那一刻起经过的墙钟毫秒。
-        //   （之前用 srvLastA + (now - srvLastAt) 是双重计数——服务端那一拍已经把时间推进过了，
-        //    再加一次 elapsed → X 以 2 倍速前进，服务端一校验就 RST。）
-        // 心跳协议（re/simlong.pcap 大疆模拟器 70s 抓包逐字节对齐后定出）：
-        //   客户端 → 服务端：01 01 08 0a | X_now | X_prev
-        //       X_now  = 客户端自己的时钟，**必须落在服务端时钟域**（与服务端 A 同量级同速率）
-        //       X_prev = **客户端自己上一拍的 X**（不是服务端的回显！）
-        //   服务端 → 客户端：01 01 08 0a | X_now(延迟2拍) | X_prev(延迟3拍)
-        //       即服务端只是把客户端的时钟延迟回显回来，让客户端能校正自己的时钟。
-        //
-        // 两个字段各自踩过坑：
-        //  · X 用本地 epoch → 与服务端差 3.5M → 服务端判定时钟不同源 → RST
-        //  · X 用 srvLastA + elapsed → 双重计数（服务端那一拍已推进过时间）→ 2 倍速 → RST
-        //  · Y 回显服务端 A → 错，Y 必须是**自己上一拍的 X**
-        int x = (int) (srvA0 + (now - srvT0));
-        int y = hbPrevX;
-        if (hbPrevX == 0) y = x - 30;    // 第一拍还没有上一值
-        hbPrevX = x;
-        byte[] h = new byte[12];
-        h[0] = 0x01;
-        h[1] = 0x01;
-        h[2] = 0x08;
-        h[3] = 0x0a;
-        h[4] = (byte) (x >>> 24);
-        h[5] = (byte) (x >>> 16);
-        h[6] = (byte) (x >>> 8);
-        h[7] = (byte) x;
-        h[8] = (byte) (y >>> 24);
-        h[9] = (byte) (y >>> 16);
-        h[10] = (byte) (y >>> 8);
-        h[11] = (byte) y;
-        return h;
+        // 用开机以来的毫秒数（SystemClock.elapsedRealtime），与服务端时钟同域；
+        // 用"App 启动以来"的毫秒会让数值比服务端上次数小 → 服务端判时钟倒退 → RST。
+        long t = android.os.SystemClock.elapsedRealtime();
+        return new byte[]{
+                0x01, 0x01, 0x08, 0x0a,
+                (byte) (t >>> 24), (byte) (t >>> 16), (byte) (t >>> 8), (byte) t,
+                (byte) (t >>> 24), (byte) (t >>> 16), (byte) (t >>> 8), (byte) t
+        };
     }
 
+
     /** 从服务端心跳记录里取 (A,B)。 */
-    private void onServerHeartbeat(byte[] h) {
-        int a = ((h[4] & 0xFF) << 24) | ((h[5] & 0xFF) << 16)
-                | ((h[6] & 0xFF) << 8) | (h[7] & 0xFF);
-        int b = ((h[8] & 0xFF) << 24) | ((h[9] & 0xFF) << 16)
-                | ((h[10] & 0xFF) << 8) | (h[11] & 0xFF);
-        if (!srvSeen) {
-            srvA0 = a;                       // 第一个 A = 时钟基准
-            srvT0 = System.currentTimeMillis();
-        }
-        srvA = a;
-        srvB = b;
-        srvLastA = a;
-        srvLastAt = System.currentTimeMillis();
-        srvSeen = true;
-    }
 
     /** 若外部（radio.yml）给了每轴校准，就用它；否则退回统一的 1024/±660。 */
     private volatile int[] axisMid, axisNeg, axisPos;
@@ -453,6 +402,15 @@ public final class DumlStick {
         axisMid = mid;
         axisNeg = neg;
         axisPos = pos;
+    }
+
+
+    /** 按实测峰值缩小某轴行程：让"用户实际能推到的位置"成为新的满行程。 */
+    public void shrinkSpan(int axis, float factor) {
+        if (axis < 0 || axis >= AXES || factor <= 0f || factor >= 1.5f) return;
+        if (axisNeg == null || axisPos == null) return;
+        axisNeg[axis] = Math.max(40, Math.round(axisNeg[axis] * factor));
+        axisPos[axis] = Math.max(40, Math.round(axisPos[axis] * factor));
     }
 
     public float unit(int axis) {
