@@ -13,6 +13,18 @@ _真机：DJI RC2（已 root），屏幕上跑的就是这个 App —— 左侧�
 
 ---
 
+## 下载（国内镜像）
+
+> GitHub 在国内经常很慢，APK 与截图包同时放了 **123 云盘**镜像：
+>
+> **<https://1843626542.share.123pan.cn/123pan/VX07Td-v8SoA?pwd=nRmH>**
+>
+> 提取码：`nRmH`（链接里已带，点开即取）
+>
+> 镜像里的内容与 GitHub Release 一致；如果链接失效，请在本仓库提 Issue。
+
+---
+
 ## 目录
 
 - [它能做什么](#它能做什么)
@@ -124,6 +136,8 @@ dji_link (127.0.0.1:40007) → DUML 帧 55 CC 30 75
 ```bash
 adb install -r RC2ETX-<ver>.apk
 ```
+
+APK 下载：GitHub Release，或国内镜像 **<https://1843626542.share.123pan.cn/123pan/VX07Td-v8SoA?pwd=nRmH>**（提取码 `nRmH`）。
 
 - Manifest 固定在 `minSdk 29 / targetSdk 29`：targetSdk ≥ 30 会被 DJI 的 `ReviewPermissionsActivity` 劫持。
 - 首次启动会申请 SD 卡目录；模型/配置写在 `Android/data/com.rc2.etx/files/sd/`，和 V15 出厂卡同构。

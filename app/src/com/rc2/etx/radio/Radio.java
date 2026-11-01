@@ -39,6 +39,10 @@ public final class Radio {
     public final int[] hidUs = new int[CH_COUNT];
     public volatile boolean hidUsValid = false;
     public volatile boolean hidOn = false;
+    // HID 最新值（由 tick 写、hidLoop 读，固定节拍发包）
+    private volatile int hidX = 512, hidY = 512, hidZ = 512, hidRz = 512, hidBtn = 0;
+    private Thread hidThread;
+
     /** 是否启用手内摇杆输入。 */
     public volatile boolean dumlOn;
     /** 最近一次从系统电池服务读到的电压(mV)，0=未知。 */
@@ -108,6 +112,7 @@ public final class Radio {
         if (com.rc2.etx.usb.UsbGadget.hasHidNode()) {
             hidOn = true;
             hid.open();
+            startHidLoop();
         }
         lastStickFrameAt = SystemClock.elapsedRealtime();
         if (dumlOn) {
@@ -266,6 +271,7 @@ public final class Radio {
         if (on) {
             hidOn = true;
             Store.saveHidOn(ctx, true);
+            startHidLoop();
             if (!com.rc2.etx.usb.UsbGadget.hasHidNode()) {
                 com.rc2.etx.usb.UsbGadget.setup(ctx);
             }
@@ -281,6 +287,42 @@ public final class Radio {
     }
 
     public boolean isHidOn() { return hidOn; }
+
+    /** 固定 4ms 节拍把最新值发给 /dev/hidg0；节点没开就定期重试，避免"重启后第一次开失败就再也不发"。 */
+    private void startHidLoop() {
+        if (hidThread != null && hidThread.isAlive()) return;
+        hidThread = new Thread(new Runnable() {
+            public void run() {
+                long lastTry = 0;
+                while (true) {
+                    try {
+                        if (hidOn) {
+                            if (!hid.isOpen()) {
+                                long now = android.os.SystemClock.elapsedRealtime();
+                                if (now - lastTry > 800) {
+                                    lastTry = now;
+                                    if (!com.rc2.etx.usb.UsbGadget.hasHidNode()) {
+                                        // 重启后 gadget 没了：自动重建（需 root，已授权的话静默完成）
+                                        com.rc2.etx.usb.UsbGadget.setup(ctx);
+                                    }
+                                    hid.open();
+                                }
+                            }
+                            if (hid.isOpen()) {
+                                hid.send(hidX, hidY, hidZ, hidRz, hidBtn, 0);
+                            }
+                        }
+                        Thread.sleep(hidOn ? 4 : 200);
+                    } catch (Throwable t) {
+                        try { Thread.sleep(50); } catch (InterruptedException ignore) { }
+                    }
+                }
+            }
+        }, "etx-hid");
+        hidThread.setDaemon(true);
+        hidThread.start();
+    }
+
 
     public void setDumlOn(boolean on) {
         dumlOn = on;
@@ -410,26 +452,23 @@ public final class Radio {
             pct[i] = Math.round(u[i] * 100f);
         }
         if (hidOn) {
-            if (!hid.isOpen()) hid.open();
-            if (hid.isOpen()) {
-                // AETR：CH1 横滚→X，CH2 俯仰→Y，CH3 油门→Z，CH4 偏航→Rz（0..1023）
-                // 优先用原生核心的真实通道值（EdgeTX 自己算的），没有再退回 Java 混控
-                int x, y, z, rz;
-                if (hidUsValid) {
-                    x = (int) Math.round((hidUs[0] - 172) * 1023.0 / 1639.0);
-                    y = (int) Math.round((hidUs[1] - 172) * 1023.0 / 1639.0);
-                    z = (int) Math.round((hidUs[2] - 172) * 1023.0 / 1639.0);
-                    rz = (int) Math.round((hidUs[3] - 172) * 1023.0 / 1639.0);
-                } else {
-                    x = (int) Math.round((u[0] + 1f) * 511.5f);
-                    y = (int) Math.round((u[1] + 1f) * 511.5f);
-                    z = (int) Math.round((u[2] + 1f) * 511.5f);
-                    rz = (int) Math.round((u[3] + 1f) * 511.5f);
-                }
-                int btn = 0;
-                for (int i = 4; i < 8; i++) if (u[i] > 0.35f) btn |= (1 << (i - 4));
-                hid.send(x, y, z, rz, btn, 0);
+            // 只更新"最新值"，真正的发包交给 hidLoop 固定 4ms 一帧（约 250Hz）。
+            // 放在 tick 里发会跟着控制环（~10ms + 抖动）走，模拟器会觉得"采样少、手感卡"。
+            int x, y, z, rz;
+            if (hidUsValid) {
+                x = (int) Math.round((hidUs[0] - 172) * 1023.0 / 1639.0);
+                y = (int) Math.round((hidUs[1] - 172) * 1023.0 / 1639.0);
+                z = (int) Math.round((hidUs[2] - 172) * 1023.0 / 1639.0);
+                rz = (int) Math.round((hidUs[3] - 172) * 1023.0 / 1639.0);
+            } else {
+                x = (int) Math.round((u[0] + 1f) * 511.5f);
+                y = (int) Math.round((u[1] + 1f) * 511.5f);
+                z = (int) Math.round((u[2] + 1f) * 511.5f);
+                rz = (int) Math.round((u[3] + 1f) * 511.5f);
             }
+            int btn = 0;
+            for (int i = 4; i < 8; i++) if (u[i] > 0.35f) btn |= (1 << (i - 4));
+            hidX = x; hidY = y; hidZ = z; hidRz = rz; hidBtn = btn;
         }
         byte[] f = encoder.encode(us);
         System.arraycopy(f, 0, lastFrame, 0, lastFrame.length);
