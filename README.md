@@ -147,6 +147,14 @@ APK 下载：GitHub Release，或国内镜像 **<https://1843626542.share.123pan
 
 ## USB 游戏手柄（电脑模拟器）
 
+> **需要 root（一次性）**：建 HID gadget 必须写 `/config/usb_gadget`，是内核层操作，普通 App 没有权限。
+> 第一次弹 root 授权框请选「**始终允许**」；之后开机 App 会自己把 gadget 重新建起来，不用再点。
+
+- 摇杆 → HID 轴：横滚 X、俯仰 Y、油门 Z、偏航 Rz（0..1023）；AUX1–4 → 按键 1–4。
+- 发包是**独立 4ms 节拍线程（约 250Hz）**，不跟控制环走；`/dev/hidg0` 掉线每 800ms 自动重开，重启后节点消失会自动重建 gadget。
+- 电脑端可选脚本：`pc/RC2-USB手柄-开启.bat` / `pc/RC2-USB手柄-还原.bat`（内部走 `/debug_ramdisk/su`）。
+
+
 建 HID gadget 需要 root（Android 没有公开接口），所以做成"一次性 + 之后免 root"：
 
 1. 用 USB 线把 RC2 连电脑，确认 `adb devices` 能看到。
