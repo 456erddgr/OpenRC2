@@ -65,7 +65,7 @@ if [ $HAVE_V7 = 1 ] || [ $HAVE_64 = 1 ]; then
   echo "[+] 注入 .so (v7=$HAVE_V7 v8a=$HAVE_64)"
   rm -rf build/inj && mkdir -p build/inj
   cp "dist/_base-$VER.apk" build/inj/base.apk
-  "$PY" scripts/inject_so.py build/inj/base.apk app/jniLibs build/inj/raw.apk
+  "$PY" scripts/inject_so.py build/inj/base.apk app/jniLibs build/inj/raw.apk app/assets
   "$SDK\zipalign.exe" -f -p 4 build/inj/raw.apk build/inj/aligned.apk
   "$JAVA" -cp "$SDK\lib\apksigner.jar" com.android.apksigner.ApkSignerTool sign \
     --ks "$SDK\debug.keystore" --ks-pass pass:rc2debug123 --key-pass pass:rc2debug123 \

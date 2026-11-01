@@ -38,5 +38,11 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/usb_device_filter" />
         </activity>
+        <!-- RC Pro(RM510)：DJI 白名单按进程名匹配，必须换进程名才拿得到 protocol 服务的 binder -->
+        <service
+            android:name=".input.RcProService"
+            android:process="com.dpad.fuli"
+            android:exported="false" />
+
     </application>
 </manifest>

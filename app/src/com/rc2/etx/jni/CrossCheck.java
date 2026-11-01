@@ -42,6 +42,7 @@ public final class CrossCheck {
             sb.append("原生核心不可用: ").append(EtxNative.error()).append('\n');
             return sb.toString();
         }
+        com.rc2.etx.sd.SdSeed.ensure(ctx);
         int rc = EtxNative.init(new File(ctx.getExternalFilesDir(null), "sd").getAbsolutePath());
         sb.append("init_rc=").append(rc).append(" version=").append(EtxNative.version()).append('\n');
         if (rc != 0) return sb.toString();

@@ -129,6 +129,31 @@ dji_link (127.0.0.1:40007) → DUML 帧 55 CC 30 75
 
 ---
 
+## 支持的机型
+
+| 机型 | SoC / 系统 | 摇杆怎么读 | 状态 |
+|---|---|---|---|
+| DJI RC2（`rc331`） | Android 11 / arm64 | DUML `127.0.0.1:40007` 持续流，24Hz | ✅ 主目标机型 |
+| DJI RC Pro（`rm510`） | 骁龙 865 / Android 10 | DJI 私有 binder（`protocol` 服务），10Hz 轮询 | ⚠️ 摇杆已通，按键待做 |
+| 普通手机 / 平板 | arm64 + 32 位兼容 | 无摇杆源，只能用触摸 | ⚠️ 能起核心，但没物理摇杆 |
+
+### RC Pro 为什么不能用同一条路
+
+- RC Pro 的 `40007` **不是持续流**：连上只给一帧快照就断，照 RC2 的读法会一直以为"没数据"。
+- 摇杆值锁在 DJI 私有服务里，要拿 `ServiceManager.getService("protocol")` 的 binder，
+  再按 `com.dji.protocol.IProtocolManager` 手工拼 Parcel 发 `transact(4)`（`cmdSet=6, cmdId=4`），
+  回调按小端 `uint16` 解 6 个通道：`右水平 / 右竖直 / 左竖直 / 左水平 / 左波轮 / 右波轮`，0..2048、中位 1024、行程 ±660。
+- **前提**：DJI 的白名单按**进程名**匹配，所以采集代码必须跑在 `android:process="com.dpad.fuli"` 里
+  （见 `app/src/com/rc2/etx/input/RcProService.java`）。主进程直接调是拿不到 binder 的。
+- 目前只接了摇杆/波轮；RC Pro 的按键与挡位在 DUML `cmdSet 6 / cmdId 174` 的 17 字节载荷里，尚未接。
+
+### 首次运行会自动铺 SD 骨架
+
+新机器（RC Pro、手机）装完 App，`sd/` 目录是空的，EdgeTX 的 `etx_init()` 会直接返回 `-1`，
+界面永远停在占位页——这就是"在遥控器上正常、装到手机上打不开"的真正原因。
+现在 `app/src/com/rc2/etx/sd/SdSeed.java` 会在初始化前补目录 + 从 assets 复制
+`radio.yml` / `model1.yml` / `labels.yml` / `SCRIPTS/TOOLS/*.lua`（只补缺，不覆盖用户改动）。
+
 ## 安装
 
 **前置**：DJI RC2（product `rc331`），已 root、已解 BL，adb 可用。

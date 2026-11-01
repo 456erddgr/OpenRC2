@@ -42,6 +42,9 @@ public final class Radio {
     // HID 最新值（由 tick 写、hidLoop 读，固定节拍发包）
     private volatile int hidX = 512, hidY = 512, hidZ = 512, hidRz = 512, hidBtn = 0;
     private Thread hidThread;
+    /** RC Pro(RM510) 的 binder 摇杆源；非空时由 rcBridge 把值搬进 duml.raw。 */
+    private com.rc2.etx.input.RcProStick rcpro;
+    private Thread rcBridge;
 
     /** 是否启用手内摇杆输入。 */
     public volatile boolean dumlOn;
@@ -115,6 +118,7 @@ public final class Radio {
             startHidLoop();
         }
         lastStickFrameAt = SystemClock.elapsedRealtime();
+        startRcProIfAny();
         if (dumlOn) {
             start();
             duml.start();
@@ -324,11 +328,54 @@ public final class Radio {
     }
 
 
+    /**
+     * RC Pro(RM510) 的摇杆锁在 DJI 私有服务里，TCP 40007 只给一帧快照。
+     * 这里把 binder 源接上，并把 6 个通道按 MCU 序搬进 duml.raw，
+     * 下游（混控/校准/HID/诊断）一行都不用改。
+     *
+     * RC Pro 通道序 0..3 与 RC2 的 MCU 序一致：RH, RV, LV, LH；4/5 = 左右波轮。
+     */
+    private void startRcProIfAny() {
+        if (rcpro != null) return;
+        if (!com.rc2.etx.input.RcProStick.available(ctx)) return;
+        rcpro = new com.rc2.etx.input.RcProStick();
+        rcpro.start(ctx);
+        Log.i(TAG, "检测到 DJI protocol 服务 → 摇杆改走 binder (RC Pro 模式)");
+        rcBridge = new Thread(new Runnable() {
+            public void run() {
+                while (true) {
+                    try {
+                        com.rc2.etx.input.RcProStick r = rcpro;
+                        if (r != null && dumlOn) {
+                            if (r.connected) {
+                                int[] v = r.raw;
+                                int[] d = duml.raw;
+                                if (v != null && d != null) {
+                                    int n = Math.min(6, Math.min(v.length, d.length));
+                                    for (int i = 0; i < n; i++) d[i] = v[i];
+                                }
+                                duml.connected = true;
+                                duml.stickFrames = r.frames;
+                                duml.lastStickMs = System.currentTimeMillis();
+                            }
+                        }
+                        Thread.sleep(10);
+                    } catch (Throwable t) {
+                        try { Thread.sleep(200); } catch (InterruptedException ignore) { }
+                    }
+                }
+            }
+        }, "etx-rcpro-bridge");
+        rcBridge.setDaemon(true);
+        rcBridge.start();
+    }
+
     public void setDumlOn(boolean on) {
         dumlOn = on;
         Store.saveDumlOn(ctx, on);
         lastStickFrameAt = SystemClock.elapsedRealtime();
         if (on) {
+            startRcProIfAny();
             duml.start();
         } else {
             duml.stop();

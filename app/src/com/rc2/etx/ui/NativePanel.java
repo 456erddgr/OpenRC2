@@ -126,7 +126,10 @@ public class NativePanel extends Panel {
             return;
         }
         try {
+            // 首次运行先把 sd 骨架铺出来：新机器（RC Pro / 手机）sd/ 是空的，
+            // 空目录会让 etx_init 直接返回 -1，界面卡在占位页。
             String root = ctx.getExternalFilesDir(null).getAbsolutePath();
+            com.rc2.etx.sd.SdSeed.ensure(ctx);
             int rc = EtxNative.init(root + "/sd");
             nw = EtxNative.screenW();
             nh = EtxNative.screenH();

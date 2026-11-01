@@ -117,6 +117,7 @@ public final class NativeProbe {
             return sb.toString();
         }
         File ext = c.getExternalFilesDir(null);
+        com.rc2.etx.sd.SdSeed.ensure(c);
         File sd = new File(ext, "sd");
         int rc;
         try {
