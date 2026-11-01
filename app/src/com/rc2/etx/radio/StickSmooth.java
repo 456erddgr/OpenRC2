@@ -37,12 +37,19 @@ public final class StickSmooth {
 
     /** 收到一个新样本时调用一次（单位 -1..1）。 */
     public synchronized void sample(long nowMs, float a0, float a1, float a2, float a3, float a4, float a5) {
-        for (int i = 0; i < N; i++) prev[i] = cur[i];
-        prevMs = curMs;
+        // 断线重连会产生 100~500ms 的空档。若沿用旧 prev，新样本一到就会
+        // 从"旧位置"插值过来，看起来像猛地弹一下（用户反馈的"卡住"）。
+        // 空档超过 250ms 时，把 prev 设成本次 cur，直接从新位置起步。
+        long gap = (has && curMs > 0) ? (nowMs - curMs) : 0;
+        boolean bridge = gap > 250;
+        if (!bridge) {
+            for (int i = 0; i < N; i++) prev[i] = cur[i];
+            prevMs = curMs;
+        }
         cur[0] = a0; cur[1] = a1; cur[2] = a2; cur[3] = a3; cur[4] = a4; cur[5] = a5;
         curMs = nowMs;
         lastArriveMs = nowMs;
-        if (!has) {
+        if (!has || bridge) {
             for (int i = 0; i < N; i++) prev[i] = cur[i];
             prevMs = nowMs - 100L;
             has = true;
