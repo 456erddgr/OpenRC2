@@ -73,10 +73,15 @@ public final class StickSmooth {
         // 40ms 内做有限外推：采样只有 ~10Hz，这一段把"跳一格"变成"连续滑"。
         float ex = 0f;
         if (dt > 0f && dt <= EXTRAP_WINDOW_MS) ex = (dt / interval) * EXTRA_GAIN;
+        // 审计修复：旧写法 d*k + d*ex 在快速推杆时会 v > cur（k=1、ex>0），
+        // 下一帧反向就形成来回过冲 —— 这正是"抽搐"。改为把 k+ex 合并后再钳到 1，
+        // 保证永远落在 prev→cur 之间，同时保留 40ms 内的平滑加速。
+        float kk = k + ex;
+        if (kk > 1f) kk = 1f;
         for (int i = 0; i < N; i++) {
             float d = cur[i] - prev[i];
             if (d < VEL_DEAD && d > -VEL_DEAD) d = 0f;
-            float v = prev[i] + d * k + d * ex;
+            float v = prev[i] + d * kk;
             if (v > 1f) v = 1f;
             else if (v < -1f) v = -1f;
             out[i] = v;

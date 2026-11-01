@@ -44,6 +44,13 @@ public final class HidJoystick {
 
     public synchronized boolean open() {
         if (open) return true;
+        // 审计修复：写失败时只把 open 置 false 而没关流，out 会一直挂着。
+        // 每次重开都新建 FileOutputStream → fd 泄漏，攒够了就"设备识别但不动"。
+        // 这里先确保旧流关闭，再开新的。
+        if (out != null) {
+            try { out.close(); } catch (Throwable ignore) { }
+            out = null;
+        }
         if (!new java.io.File(DEV).exists()) ensureGadget();
         try {
             out = new FileOutputStream(DEV);
@@ -103,6 +110,9 @@ public final class HidJoystick {
             } catch (Throwable t) {
                 err = t.toString();
                 open = false;
+                // 关掉坏流，交给 startHidLoop 的 800ms 重试重新 open()。
+                try { if (out != null) out.close(); } catch (Throwable ignore) { }
+                out = null;
                 Log.w(TAG, "write failed: " + err);
             }
         }
