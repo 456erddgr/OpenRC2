@@ -155,8 +155,10 @@ public final class CalibPanel extends Panel {
         // phase 2：满行程采集 —— 每根杆都要"顶到满行程并保持 2 秒"，逐根计数
         float[] v = new float[6];
         for (int ax = 0; ax < 4; ax++) {
+            // c.raw 已经是 -1..1 归一化值，直接用差值判定行程；
+            // 早前在这里又除了一次 0.66，导致"推到底也到不了 1.0"，界面永远显示不满。
             float d = c.raw[ax] - midRaw[ax];
-            v[ax] = d > 0.0001f ? Math.min(1f, d / 0.66f) : Math.max(-1f, d / 0.66f);
+            v[ax] = d > 1f ? 1f : (d < -1f ? -1f : d);
         }
         if (phase == 2) {
             for (int ax = 0; ax < 4; ax++) {
