@@ -317,6 +317,10 @@ public class MainActivity extends Activity implements Host {
                 public void run() { com.rc2.etx.jni.EtxNative.release(k); }
             }, 60);
             Log.i(TAG, "press " + k + " (release in 60ms)");
+        } else if ("card".equals(act)) {
+            int ci = i.getIntExtra("i", 0);
+            if (view != null) view.fireCard(ci);
+            Log.i(TAG, "intent action=card i=" + ci);
         } else if ("rotary".equals(act)) {
             // 旋钮钩子：n>0 顺时针 n 格，n<0 逆时针 |n| 格（供命令行验页内滚动/改值）
             final int n = i.getIntExtra("n", 1);

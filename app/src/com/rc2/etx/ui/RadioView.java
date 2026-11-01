@@ -115,6 +115,15 @@ public final class RadioView extends View {
         return page;
     }
 
+    /** 自动化调试钩子：直接触发设置页某张卡片（0型号 1主题 2校准 3导出）。 */
+    public void fireCard(int idx) {
+        if (panels.length > 6 && panels[6] instanceof SetPage) {
+            android.util.Log.i("ETX-Set", "fireCard " + idx);
+            ((SetPage) panels[6]).fireCardForTest(idx);
+        }
+        setPage(6);
+    }
+
     public void setPage(int p) {
         if (p >= 0 && p < panels.length) page = p;
         invalidate();

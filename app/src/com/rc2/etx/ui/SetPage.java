@@ -29,6 +29,9 @@ public class SetPage extends Panel {
     public SetPage(Radio r) { super(r); }
     @Override public String title() { return "设置"; }
     public void setOnCard(OnCard o) { cb = o; }
+    /** 给调试钩子用：等同于用户点了这张卡。 */
+    public void fireCardForTest(int i) { if (cb != null) cb.onCard(i); }
+
     public void setValue(int i, String v) { if (i >= 0 && i < 4) val[i] = v; }
 
     private void put(Canvas c, String s, float x, float y, float sp, int col, boolean bold) {

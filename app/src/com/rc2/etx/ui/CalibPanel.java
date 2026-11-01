@@ -44,6 +44,8 @@ public final class CalibPanel extends Panel {
     private static final String[] SLOT_NAME = {"油门", "副翼", "俯仰", "偏航"};
     private final int[] bind = {-1, -1, -1, -1};
     private int slot;            // 当前要绑的槽位
+    private final long[] holdMs = new long[4];
+    private long centerMs;
     private int phase;           // 0=采中点 1=自动绑定 2=满行程测试
     private long phaseT0;
     private int curAxis = -1, curDir = 0;
@@ -150,12 +152,38 @@ public final class CalibPanel extends Panel {
             }
             return;
         }
-        // phase 2：满行程采集
+        // phase 2：满行程采集 —— 每根杆都要"顶到满行程并保持 2 秒"，逐根计数
+        float[] v = new float[6];
         for (int ax = 0; ax < 4; ax++) {
-            mnRaw[ax] = Math.min(mnRaw[ax], c.raw[ax]);
-            mxRaw[ax] = Math.max(mxRaw[ax], c.raw[ax]);
+            float d = c.raw[ax] - midRaw[ax];
+            v[ax] = d > 0.0001f ? Math.min(1f, d / 0.66f) : Math.max(-1f, d / 0.66f);
         }
-        if (now - phaseT0 > 5000) finish();
+        if (phase == 2) {
+            for (int ax = 0; ax < 4; ax++) {
+                mnRaw[ax] = Math.min(mnRaw[ax], c.raw[ax]);
+                mxRaw[ax] = Math.max(mxRaw[ax], c.raw[ax]);
+            }
+            int done = 0;
+            for (int i = 0; i < 4; i++) {
+                int ax = bind[i];
+                if (ax < 0) continue;
+                boolean full = Math.abs(v[ax]) >= 0.92f;
+                if (full) holdMs[i] += 33; else holdMs[i] = 0;
+                if (holdMs[i] >= 2000) done++;
+            }
+            hint = "推满并保持 2 秒：" + done + " / 4 根完成";
+            if (done >= 4) { phase = 3; phaseT0 = now; hint = "全部推满完成，现在把四根杆松手回中"; }
+            return;
+        }
+        // phase 3：回中确认 —— 四轴都回到中位并保持 1.5 秒
+        if (phase == 3) {
+            boolean centered = Math.abs(v[0]) < 0.08f && Math.abs(v[1]) < 0.08f
+                    && Math.abs(v[2]) < 0.08f && Math.abs(v[3]) < 0.08f;
+            if (centered) centerMs += 33; else centerMs = 0;
+            hint = "回中保持：" + (centerMs / 1000f) + " / 1.5 秒";
+            if (centerMs >= 1500) finish();
+            return;
+        }
     }
 
     private boolean isBound(int ax) {

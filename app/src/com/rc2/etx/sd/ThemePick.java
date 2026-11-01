@@ -19,6 +19,17 @@ public class ThemePick {
     public static String current(Context c) {
         try {
             File f = new File(new File(sdDir(c), "RADIO"), "radio.yml");
+            // 先备份：整文件重写一旦格式出错，EdgeTX 会把 radio.yml 改名成
+            // radio_error.yml 并退回占位页（实测踩过），备份便于自动回滚。
+            File bak = new File(f.getParentFile(), "radio.yml.bak");
+            try {
+                java.io.FileInputStream in = new java.io.FileInputStream(f);
+                java.io.FileOutputStream bo = new java.io.FileOutputStream(bak);
+                byte[] bb = new byte[8192];
+                int n;
+                while ((n = in.read(bb)) > 0) bo.write(bb, 0, n);
+                in.close(); bo.close();
+            } catch (Throwable ign) { }
             if (!f.exists()) return "?";
             java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
             String l;
