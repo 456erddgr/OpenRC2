@@ -220,7 +220,11 @@ public final class DumlStick {
             reconnects++;
             // 退避重连：1s/2s/4s/8s（上限 8s）。不给 dji_link 的客户端配额造成压力，
             // 也不像原来的"1s 固定 + 看门狗 4s/8s/16s/30s"那样两套退避互相打架。
-            long wait = Math.min(1000L << Math.min(failStreak, 3), 8000L);
+            // RC Pro：连上立刻 EOF 且收到过帧 → 快照模式，10ms 内重连继续取下一帧。
+            if (failStreak == 1 && frames > 0 && (System.currentTimeMillis() - lastFrameMs) < 1500) {
+                snapMode = true;
+            }
+            long wait = snapMode ? 10L : Math.min(1000L << Math.min(failStreak, 3), 8000L);
             try {
                 Thread.sleep(wait);
             } catch (InterruptedException ignore) {
@@ -291,6 +295,18 @@ public final class DumlStick {
             seen.put(key, "len=" + len + " " + hex(b, off, Math.min(len, 96)));
             Log.i(TAG, "frame " + key + " len=" + len);
         }
+        // RC Pro(RM510)：cmdId 174(0xAE) 在 40007 上是按键/挡位帧（17B 载荷），不是摇杆帧。
+        boolean isBtn = (cmdSet == 0x06 && cmdId == 0xAE && len >= 28 && !isStickLike(b, off, len));
+        if (isBtn) {
+            int p = off + 11;
+            b0 = b[p] & 0xFF;
+            b1 = b[p + 1] & 0xFF;
+            b2 = b[p + 2] & 0xFF;
+            btnMs = System.currentTimeMillis();
+            btnFrames++;
+            if (btnFrames <= 3) Log.i(TAG, "btn frame p0=" + b0 + " p1=" + b1 + " p2=" + b2);
+            return;
+        }
         boolean isStick = (cmdSet == 0x06 && cmdId == 0xAE);
         if (isStick && len >= 28) {
             int p = off + 16;
@@ -326,8 +342,31 @@ public final class DumlStick {
         }
     }
 
+    private int btnFrames;
+
+    /** 摇杆帧的 6×u16 全部 <=2047；只要有一个越界就说明这是 174 按键帧。 */
+    private static boolean isStickLike(byte[] b, int off, int len) {
+        if (len < 28) return false;
+        int p = off + 16;
+        for (int k = 0; k < 6; k++) {
+            int v = (b[p + k * 2] & 0xFF) | ((b[p + k * 2 + 1] & 0xFF) << 8);
+            if (v > 2047) return false;
+        }
+        return true;
+    }
+
     /** 最近一次从服务端收到的心跳对（A,B）。 */
     private volatile int srvA, srvB;
+
+    /** RC Pro 专有：按键/挡位帧 06/AE(174) 的 3 个字节。 */
+    private volatile int b0, b1, b2;
+    private volatile long btnMs;
+    /** RC Pro 的 40007 是"连一次给一帧就断"的快照模式，检测到就改用快速重连。 */
+    private volatile boolean snapMode;
+
+    public int btnRaw(int i) { return i == 0 ? b0 : (i == 1 ? b1 : b2); }
+    public long btnAgeMs() { return System.currentTimeMillis() - btnMs; }
+    public boolean isSnapMode() { return snapMode; }
     private volatile boolean srvSeen;
     /** 服务端最近一次心跳的 A（用于诊断；X 基准取第一个 A）。 */
     private volatile int srvLastA;

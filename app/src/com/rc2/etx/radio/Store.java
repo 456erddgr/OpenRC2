@@ -45,6 +45,26 @@ public final class Store {
         }
     }
 
+    /** 遥控器型号：0=自动识别 1=RC2 2=RC Pro。自动模式下用系统型号 + protocol 服务探测。 */
+    public static int loadModel(Context c) {
+        try {
+            return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("radioModel", 0);
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    public static void saveModel(Context c, int m) {
+        try {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("radioModel", m).apply();
+        } catch (Throwable ignore) {
+        }
+    }
+
+    public static String modelName(int m) {
+        return m == 1 ? "RC2" : (m == 2 ? "RC Pro" : "自动识别");
+    }
+
     public static boolean loadHidOn(Context c) {
         try {
             return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("hidOn", false);

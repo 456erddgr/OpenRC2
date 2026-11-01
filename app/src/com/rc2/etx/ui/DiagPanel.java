@@ -18,7 +18,7 @@ import java.util.List;
 public final class DiagPanel extends Panel {
 
     private static final String[] LABEL = {
-            "运行自检", "设备信息", "USB 列表", "root 状态", "保存诊断", "清空"};
+            "运行自检", "设备信息", "型号设置", "root 状态", "保存诊断", "导出诊断"};
 
     private final Context ctx;
     private final Host host;
@@ -154,7 +154,11 @@ public final class DiagPanel extends Panel {
             return true;
         }
         if (Ui.in(btn[2], x, y)) {
-            set("== 当前可见 USB 设备 ==\n" + UsbSerial.list(ctx));
+            int m = com.rc2.etx.radio.Store.loadModel(ctx);
+            m = (m + 1) % 3;
+            com.rc2.etx.radio.Store.saveModel(ctx, m);
+            append("遥控器型号 → " + com.rc2.etx.radio.Store.modelName(m)
+                    + "（下次启动摇杆源按此选择）");
             return true;
         }
         if (Ui.in(btn[3], x, y)) {
@@ -177,7 +181,29 @@ public final class DiagPanel extends Panel {
             return true;
         }
         if (Ui.in(btn[5], x, y)) {
-            set("已清空。");
+            String NL2 = System.lineSeparator();
+            try {
+                java.io.File base = ctx.getExternalFilesDir(null);
+                java.io.File out = new java.io.File(base, "exports");
+                out.mkdirs();
+                String[] names = {"sd_probe.txt", "hid.txt", "native.txt", "devices.txt"};
+                StringBuilder sb = new StringBuilder();
+                for (String n : names) {
+                    java.io.File f = new java.io.File(base, n);
+                    if (!f.exists()) continue;
+                    java.io.File dst = new java.io.File(out, n);
+                    java.io.FileInputStream in = new java.io.FileInputStream(f);
+                    java.io.FileOutputStream fo = new java.io.FileOutputStream(dst, false);
+                    byte[] buf = new byte[8192];
+                    int r;
+                    while ((r = in.read(buf)) > 0) fo.write(buf, 0, r);
+                    in.close(); fo.close();
+                    sb.append(n).append(" ").append(dst.length()).append("B ");
+                }
+                append("已导出到:" + NL2 + "  " + out.getAbsolutePath() + NL2 + sb);
+            } catch (Throwable e2) {
+                append("导出失败: " + e2);
+            }
             return true;
         }
         return true;

@@ -188,6 +188,7 @@ public final class Radio {
             axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
             axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
             axes7[6] = 1024;                    // P3（无硬件）
+            applyRcProButtons(axes7);
         } else {
             axes7[0] = synthAdc(input.lx);   // LH  (yaw)
             axes7[1] = synthAdc(input.ly);   // LV  (throttle)
@@ -337,7 +338,16 @@ public final class Radio {
      */
     private void startRcProIfAny() {
         if (rcpro != null) return;
-        if (!com.rc2.etx.input.RcProStick.available(ctx)) return;
+        int model = com.rc2.etx.radio.Store.loadModel(ctx);
+        if (model == 1) {                    // 用户明确选了 RC2：不走 binder
+            android.util.Log.i(TAG, "型号设置=RC2，跳过 protocol binder");
+            return;
+        }
+        boolean avail = com.rc2.etx.input.RcProStick.available(ctx);
+        if (!avail && model == 2) {          // 明确选了 RC Pro 但服务没就绪：仍然起，靠重试
+            android.util.Log.w(TAG, "型号设置=RC Pro，但 protocol 服务暂不可见，稍后重试");
+        }
+        if (!avail && model != 2) return;
         rcpro = new com.rc2.etx.input.RcProStick();
         rcpro.start(ctx);
         Log.i(TAG, "检测到 DJI protocol 服务 → 摇杆改走 binder (RC Pro 模式)");
@@ -557,4 +567,52 @@ public final class Radio {
     public void poke(int idx, float v) {
         input.touch(idx, v);
     }
+    // ---------------- RC Pro(RM510) 按键 / 拨轮 ----------------
+    /** 上一次的五维/返回按键状态，用于边沿检测（避免按住不停发键）。 */
+    private int lastNav = -1;
+    private int keysSent;
+    private int lastBtn2 = -1;
+
+    /**
+     * RC Pro 的按键在 DUML 06/AE(174) 帧里（17 字节载荷）：
+     *   p0 0x80 快门半按 / 0x40 快门全按 / 0x20 返航 / 0x10 急停
+     *   p1 0x80 上 / 0x40 下 / 0x20 左 / 0x10 右 / 0x08 中(确认) / 0x01 录像
+     *   p2 bit0-1 挡位(S/N/C) / 0x04 C1 / 0x08 C2 / 0x10 C3 / 0x20 返回
+     * 这里把五维与返回映射成 EdgeTX 的导航键，C1..C3 映射成 P1..P3 三档开关。
+     */
+    private void applyRcProButtons(int[] axes7) {
+        if (duml == null || !duml.isSnapMode()) return;
+        if (duml.btnAgeMs() > 1500) return;          // 帧停了就别再动开关
+        int p1 = duml.btnRaw(1);
+        int p2 = duml.btnRaw(2);
+
+        int nav = 0;
+        if ((p1 & 0x80) != 0) nav = 0;               // ↑
+        else if ((p1 & 0x40) != 0) nav = 1;          // ↓
+        else if ((p1 & 0x20) != 0) nav = 2;          // ←
+        else if ((p1 & 0x10) != 0) nav = 3;          // →
+        else if ((p1 & 0x08) != 0) nav = 4;          // 中 = ENT
+        else if ((p2 & 0x20) != 0) nav = 5;          // 返回 = RTN
+        if (nav != lastNav) {
+            if (nav >= 0) {
+                try {
+                    com.rc2.etx.jni.EtxNative.press(nav);
+                    keysSent++;
+                } catch (Throwable ignore) {
+                }
+            }
+            lastNav = nav;
+        }
+
+        int b2 = p2 & 0x1C;
+        if (b2 != lastBtn2) {
+            axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
+            axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
+            axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;    // C3 → P3
+            lastBtn2 = b2;
+        }
+        if (nav < 0) lastNav = -1;
+    }
+
+
 }

@@ -131,6 +131,8 @@ public class NativePanel extends Panel {
             String root = ctx.getExternalFilesDir(null).getAbsolutePath();
             com.rc2.etx.sd.SdSeed.ensure(ctx);
             int rc = EtxNative.init(root + "/sd");
+            com.rc2.etx.sd.SdSeed.writeProbe(new java.io.File(root + "/sd"), rc,
+                    "abi=" + android.os.Build.SUPPORTED_ABIS[0] + " model=" + android.os.Build.MODEL);
             nw = EtxNative.screenW();
             nh = EtxNative.screenH();
             if (rc != 0 || nw <= 0 || nh <= 0) {

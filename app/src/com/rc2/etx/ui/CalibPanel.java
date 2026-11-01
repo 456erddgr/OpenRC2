@@ -39,7 +39,14 @@ public final class CalibPanel extends Panel {
     private volatile boolean running;
     private volatile long holdStart;
     private volatile boolean done;
-    private volatile String hint = "点「开始校准」，然后照着提示推杆";
+    private volatile String hint = "点「开始校准」：推哪根杆就自动绑哪根";
+    // 自动校准：order = 绑定顺序（0油门 1副翼 2俯仰 3偏航），bind[slot] = 物理轴号
+    private static final String[] SLOT_NAME = {"油门", "副翼", "俯仰", "偏航"};
+    private final int[] bind = {-1, -1, -1, -1};
+    private int slot;            // 当前要绑的槽位
+    private int phase;           // 0=采中点 1=自动绑定 2=满行程测试
+    private long phaseT0;
+    private int curAxis = -1, curDir = 0;
 
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
     private RectF btnStart, btnCancel, box;
@@ -67,7 +74,7 @@ public final class CalibPanel extends Panel {
 
     private static float d(float v) { return v * DP; }
 
-    @Override public void draw(Canvas c, Ui ui, RectF a) { layout2(a); drawBody(c, ui, a); }
+    @Override public void draw(Canvas c, Ui ui, RectF a) { layout2(a); drawBody(c, ui, a); drawAuto(c, ui, a); }
 
     private void layout2(RectF a) {
         float w = a.width(), h = a.height();
@@ -87,7 +94,10 @@ public final class CalibPanel extends Panel {
         for (int i = 0; i < 4; i++) { midRaw[i] = 0; mnRaw[i] = 9f; mxRaw[i] = -9f; }
         has = new boolean[steps.length];
         idx = 0; running = true; done = false; holdStart = 0;
-        hint = "所有摇杆回中，别碰";
+        for (int i = 0; i < 4; i++) bind[i] = -1;
+        slot = 0; phase = 0; phaseT0 = System.currentTimeMillis();
+        curAxis = -1; curDir = 0;
+        hint = "松手、所有摇杆回中（1 秒）";
     }
 
     private void finish() {
@@ -105,41 +115,52 @@ public final class CalibPanel extends Panel {
     }
 
     @Override public void tick() {
-        if (!running || idx >= steps.length) return;
+        if (!running) return;
         Calib c = r.calib;
-        Step s = steps[idx];
-        if (!has[idx]) {           // 第一帧：记下起始值，避免把旧样本当成本步结果
-            for (int ax = 0; ax < 4; ax++) {
-                if (s.axis < 0) midRaw[ax] = c.raw[ax];
-                if (s.axis == ax && s.dir < 0) mnRaw[ax] = c.raw[ax];
-                if (s.axis == ax && s.dir > 0) mxRaw[ax] = c.raw[ax];
+        long now = System.currentTimeMillis();
+        if (phase == 0) {                       // 采中点
+            for (int ax = 0; ax < 4; ax++) midRaw[ax] += (c.raw[ax] - midRaw[ax]) * 0.15f;
+            if (now - phaseT0 > 900) {
+                phase = 1; phaseT0 = now;
+                hint = "推「" + SLOT_NAME[0] + "」杆到任意一边（自动绑定第 1/4 根）";
             }
-            has[idx] = true;
-        }
-        if (s.axis < 0) {
-            midRaw[AX_LX] += (c.raw[AX_LX] - midRaw[AX_LX]) * 0.08f;
-            midRaw[AX_LY] += (c.raw[AX_LY] - midRaw[AX_LY]) * 0.08f;
-            midRaw[AX_RX] += (c.raw[AX_RX] - midRaw[AX_RX]) * 0.08f;
-            midRaw[AX_RY] += (c.raw[AX_RY] - midRaw[AX_RY]) * 0.08f;
-            if (holdStart == 0) holdStart = System.currentTimeMillis();
-            if (System.currentTimeMillis() - holdStart > 900) next();
             return;
         }
-        float v = c.raw[s.axis];
-        if (s.dir < 0) mnRaw[s.axis] = Math.min(mnRaw[s.axis], v);
-        else mxRaw[s.axis] = Math.max(mxRaw[s.axis], v);
-        float span = s.dir < 0 ? (midRaw[s.axis] - v) : (v - midRaw[s.axis]);
-        if (span > 0.72f) {
-            if (holdStart == 0) holdStart = System.currentTimeMillis();
-            if (System.currentTimeMillis() - holdStart > 150) next();
-        } else holdStart = 0;
+        if (phase == 1) {                       // 自动绑定：哪个轴动得最多就绑它
+            int best = -1; float bestD = 0;
+            for (int ax = 0; ax < 4; ax++) {
+                if (isBound(ax)) continue;
+                float dd = Math.abs(c.raw[ax] - midRaw[ax]);
+                if (dd > bestD) { bestD = dd; best = ax; }
+            }
+            if (best >= 0 && bestD > 0.35f) {
+                bind[slot] = best;
+                curAxis = best;
+                // 方向不用问：min/max 都采，反向会在满行程阶段自然被写进 min/max
+                curDir = c.raw[best] > midRaw[best] ? 1 : -1;
+                mnRaw[best] = Math.min(mnRaw[best], c.raw[best]);
+                mxRaw[best] = Math.max(mxRaw[best], c.raw[best]);
+                slot++;
+                if (slot >= 4) {
+                    phase = 2; phaseT0 = now;
+                    hint = "已绑定四轴。现在把每根杆都打满、乱摇 5 秒";
+                } else {
+                    hint = "已绑「" + SLOT_NAME[slot - 1] + "」→ 再推「" + SLOT_NAME[slot] + "」";
+                }
+            }
+            return;
+        }
+        // phase 2：满行程采集
+        for (int ax = 0; ax < 4; ax++) {
+            mnRaw[ax] = Math.min(mnRaw[ax], c.raw[ax]);
+            mxRaw[ax] = Math.max(mxRaw[ax], c.raw[ax]);
+        }
+        if (now - phaseT0 > 5000) finish();
     }
 
-    private void next() {
-        idx++;
-        holdStart = 0;
-        if (idx >= steps.length) finish();
-        else hint = steps[idx].text;
+    private boolean isBound(int ax) {
+        for (int i = 0; i < 4; i++) if (bind[i] == ax) return true;
+        return false;
     }
 
     private void drawBody(Canvas c, Ui ui, RectF a) {
@@ -164,8 +185,8 @@ public final class CalibPanel extends Panel {
         // 目标方向脉冲箭头
         float anim = (float) ((System.currentTimeMillis() % 1000) / 1000.0);
         float k = 0.55f + 0.45f * (float) Math.abs(Math.sin(anim * Math.PI));
-        int axis = running ? steps[Math.min(idx, steps.length - 1)].axis : -1;
-        int dir = running ? steps[Math.min(idx, steps.length - 1)].dir : 0;
+        int axis = running ? curAxis : -1;
+        int dir = running ? curDir : 0;
         p.setStyle(Paint.Style.FILL);
         p.setColor(Ui.ACC);
         float ax = cx, ay = cy + d(30);
@@ -223,4 +244,60 @@ public final class CalibPanel extends Panel {
         }
         return false;
     }
+    /** 自动校准的可视化：四轴胶囊状态 + 每轴满行程条 + 阶段倒计时环。 */
+    private void drawAuto(Canvas c, Ui ui, RectF a) {
+        if (!running && !done) return;
+        float x = a.left + ui.d(16);
+        float y = a.top + ui.d(10);
+        float cw = (a.width() - ui.d(48)) / 4f;
+        float ch = ui.d(26);
+        p.setAntiAlias(true);
+        p.setTextSize(ui.d(12));
+        for (int i = 0; i < 4; i++) {
+            boolean bound = bind[i] >= 0;
+            RectF rr = new RectF(x + i * (cw + ui.d(6)), y, x + i * (cw + ui.d(6)) + cw, y + ch);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(bound ? 0xFF1E7A5A : 0xFF1A2230);
+            c.drawRoundRect(rr, ui.d(8), ui.d(8), p);
+            if (bound) {
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(ui.d(2));
+                p.setColor(0xFF5AD1A5);
+                c.drawRoundRect(rr, ui.d(8), ui.d(8), p);
+                p.setStyle(Paint.Style.FILL);
+            }
+            p.setColor(bound ? 0xFF8FF0CC : 0xFF5B6B7C);
+            p.setTextAlign(Paint.Align.CENTER);
+            c.drawText((bound ? "✓ " : "○ ") + SLOT_NAME[i], rr.centerX(), rr.centerY() + ui.d(4), p);
+        }
+        float by = y + ch + ui.d(14);
+        float bw = a.width() - ui.d(32);
+        p.setTextAlign(Paint.Align.LEFT);
+        for (int i = 0; i < 4; i++) {
+            int ax = bind[i];
+            if (ax < 0) continue;
+            float span = Math.min(1f, (mxRaw[ax] - mnRaw[ax]) / 1.35f);
+            RectF bar = new RectF(a.left + ui.d(16), by + i * ui.d(20), a.left + ui.d(16) + bw, by + i * ui.d(20) + ui.d(13));
+            p.setColor(0xFF18202B); c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
+            p.setColor(span > 0.92f ? 0xFF5AD1A5 : (span > 0.7f ? 0xFFF5B942 : 0xFFE0653B));
+            bar.right = bar.left + bw * span;
+            c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
+            p.setColor(0xFFC7D3DF);
+            p.setTextSize(ui.d(11));
+            c.drawText(SLOT_NAME[i] + "  " + (int) (span * 100) + "%",
+                    a.left + ui.d(22), bar.centerY() + ui.d(4), p);
+        }
+        if (phase == 2) {
+            float t = Math.min(1f, (System.currentTimeMillis() - phaseT0) / 5000f);
+            RectF ring = new RectF(a.centerX() - ui.d(22), a.bottom - ui.d(70), a.centerX() + ui.d(22), a.bottom - ui.d(26));
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(ui.d(4));
+            p.setColor(0xFF2A3442);
+            c.drawArc(ring, 0, 360, false, p);
+            p.setColor(0xFFF5B942);
+            c.drawArc(ring, -90, 360 * t, false, p);
+            p.setStyle(Paint.Style.FILL);
+        }
+    }
+
 }

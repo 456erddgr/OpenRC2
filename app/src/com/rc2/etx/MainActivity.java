@@ -167,18 +167,27 @@ public class MainActivity extends Activity implements Host {
     private void initUsbWatcher() {
         usbStateRx = new android.content.BroadcastReceiver() {
             public void onReceive(Context c, Intent it) {
-                int cs = it.getIntExtra("connected", 0);
+                int cs = Intent.ACTION_POWER_CONNECTED.equals(it.getAction())
+                        ? 1 : it.getIntExtra("connected", 0);
                 if (usbConnected < 0) { usbConnected = cs; return; }   // 首次只记状态，不弹
-                if (cs == 1 && usbConnected == 0) showUsbModeDialog();  // 只在 0->1 弹
+                if (cs == 0) usbDialogShown = false;                    // 拔线复位
+                if (cs == 1) showUsbModeDialog();                        // 插上就弹（不再要求 0->1）
                 usbConnected = cs;
             }
         };
         IntentFilter f = new IntentFilter("android.hardware.usb.action.USB_STATE");
+        f.addAction(Intent.ACTION_POWER_CONNECTED);
         registerReceiver(usbStateRx, f);
         // 已经插着线时（App 后启动）也要弹一次：线一直插着不会有 0->1 广播，
         // 之前只等广播导致"插着永远不弹"（m05206）。
         android.os.BatteryManager bm = (android.os.BatteryManager) getSystemService(BATTERY_SERVICE);
-        final boolean plugged = bm != null && bm.isCharging()
+        // 注意：绑上 HID gadget 之后系统不再报"在充电"，只靠 isCharging() 会永远不弹（回归 bug）。
+        // 所以再加两条：①/dev/hidg0 在（说明线接着且已经是手柄模式）②USB 供电属性非 0。
+        boolean gadget = false;
+        try { gadget = com.rc2.etx.usb.UsbGadget.hasHidNode(); } catch (Throwable ignore) { }
+        boolean powered = false;
+        try { powered = bm != null && bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS) != 0; } catch (Throwable ignore) { }
+        final boolean plugged = ((bm != null && bm.isCharging()) || powered || gadget)
                 && getIntent() != null && getIntent().getStringExtra("action") == null;
         if (plugged) {
             usbConnected = 1;
@@ -188,6 +197,7 @@ public class MainActivity extends Activity implements Host {
                     new android.os.Handler(getMainLooper()).postDelayed(new Runnable() {
                         public void run() {
                             try { if (usbDlg != null && usbDlg.isShowing()) usbDlg.dismiss(); } catch (Throwable ignore) { }
+                            usbDialogShown = false;   // 自动收起后必须复位，否则下次插线永远不再弹
                         }
                     }, 20000);
                 }
