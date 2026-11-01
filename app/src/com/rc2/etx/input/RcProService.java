@@ -40,6 +40,7 @@ public class RcProService extends Service {
             85, 1, 0, 0, 4, 2, 0, 6, -1, 0, 2, 0, 0, 6, 4, 0, 0, 0, 300, 0
     };
 
+    private volatile boolean transactBusy;
     private final List<Messenger> clients = new ArrayList<Messenger>();
     private volatile int[] lastValues;
     private volatile long lastAt;
@@ -132,6 +133,10 @@ public class RcProService extends Service {
                 publishError("getService(\"protocol\") = null（进程名可能不在白名单）");
                 return;
             }
+            // 防重入：轮询定时器与重连线程可能同时进来，binder 服务端是单队列，
+            // 并发 transact 会把队列塞满，表现就是"推几下就卡住不动"。
+            if (transactBusy) return;
+            transactBusy = true;
             IBinder binder = (IBinder) o;
             data.writeInterfaceToken(IFACE_PROTOCOL);
             data.writeInt(1);
@@ -149,6 +154,7 @@ public class RcProService extends Service {
             Throwable c = t.getCause() != null ? t.getCause() : t;
             publishError(c.getClass().getSimpleName() + ": " + c.getMessage());
         } finally {
+            transactBusy = false;
             try { data.recycle(); } catch (Throwable ignore) { }
             try { reply.recycle(); } catch (Throwable ignore) { }
         }
