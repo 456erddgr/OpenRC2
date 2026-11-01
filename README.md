@@ -168,6 +168,7 @@ ETX_SO=../RC2-EdgeTX-Native/out/libetx/libetx.so ./scripts/build-apk.sh 1.20.7
 
 | 项 | 状态 |
 |---|---|
+| 「模型管理」网格不显示模型格 | **已知问题**：`modelslist` 数据正常（`labels.yml` 有条目）、`DE65.png` 在、`当前模型: F62` 正常，但格子不画。疑在 tile 渲染/布局，追查中 |
 | EdgeTX 菜单里按 `ENT` 偶发崩溃 | **修中**：上游 `menu.cpp` 先 `deleteLater()` 再 `onPress()` 的 UAF，已在 `table.cpp::setRowCount()` 加空指针检查（vendor 第 2 处改动） |
 | Lua 脚本页（APP/LUA脚本） | 引擎已编进去（Lua 5.3，621 个符号），但要等上面那条修完才能真正用起来验 |
 | 机身射频发 ELRS | **不可行**：DJI 私有 SDR + 定制 ASIC，没有公开接口。正路是外接 ELRS TX 模块 |
