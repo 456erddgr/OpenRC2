@@ -23,6 +23,7 @@ public final class SdSeed {
     private static final String TAG = "ETXSd";
     private static final String[] DIRS = {
             "RADIO", "MODELS", "SCRIPTS", "SCRIPTS/TOOLS", "SCRIPTS/MIXES",
+            "THEMES", "IMAGES", "SOUNDS", "LOGS", "SCREENSHOTS",
             "IMAGES", "SOUNDS", "LOGS", "SCREENSHOTS", "THEMES"
     };
 
@@ -38,6 +39,8 @@ public final class SdSeed {
         copyIfMissing(ctx, sd, "RADIO/radio.yml");
         copyIfMissing(ctx, sd, "MODELS/model1.yml");
         copyIfMissing(ctx, sd, "MODELS/labels.yml");
+        copyTree(ctx, sd, "THEMES");
+        copyTree(ctx, sd, "IMAGES");
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/elrsV3.lua");
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/elrsgyro.lua");
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/rf2.lua");
@@ -109,4 +112,29 @@ public final class SdSeed {
             }
         }
     }
+    /** 递归复制 assets 下的整棵目录（只补缺，不覆盖用户改动）。 */
+    private static void copyTree(Context ctx, File sd, String rel) {
+        try {
+            String[] kids = ctx.getAssets().list("sd_seed/" + rel);
+            if (kids == null) return;
+            for (String k : kids) {
+                copyTree0(ctx, sd, rel + "/" + k);
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("SdSeed", "copyTree " + rel + " failed: " + t);
+        }
+    }
+
+    private static void copyTree0(Context ctx, File sd, String rel) {
+        try {
+            String[] kids = ctx.getAssets().list("sd_seed/" + rel);
+            if (kids != null && kids.length > 0) {
+                for (String k : kids) copyTree0(ctx, sd, rel + "/" + k);
+                return;
+            }
+            copyIfMissing(ctx, sd, rel);
+        } catch (Throwable ignore) {
+        }
+    }
+
 }

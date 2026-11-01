@@ -1,0 +1,17 @@
+---
+summary: 
+   name: "RadioSky"
+   author: "RadioSky FPV"
+   info: "Don't drink and fly"
+colors: 
+   PRIMARY1: 0x602470
+   PRIMARY2: 0xD0DCF8
+   PRIMARY3: 0x787C78
+   SECONDARY1: 0x602470
+   SECONDARY2: 0xE0E0E0
+   SECONDARY3: 0x30DCD8
+   FOCUS: 0x888C88
+   EDIT: 0x989898
+   ACTIVE: 0xA8ACA8
+   WARNING: 0xF8FCF8
+   DISABLED: 0x808080

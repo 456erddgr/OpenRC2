@@ -1,0 +1,19 @@
+---
+summary: 
+   name: "v15"
+   author: "JimB40"
+   info: "Grays are sexi. Let's explore this bando."
+colors: 
+   PRIMARY1: 0x000000
+   PRIMARY2: 0xF8FCF8
+   PRIMARY3: 0x000000
+   SECONDARY1: 0x202020
+   SECONDARY2: 0xB8B8B8
+   SECONDARY3: 0x686C68
+   FOCUS: 0xF0CC50
+   EDIT: 0xE0E4E0
+   ACTIVE: 0xF0CC50
+   WARNING: 0xF80000
+   DISABLED: 0x000000
+   QM_BG: 0x000000
+   QM_FG: 0xF0CC50
