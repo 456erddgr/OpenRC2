@@ -206,3 +206,25 @@ I ETX-Radio: binder 补帧 #3
 ```
 
 意义：RST 仍然存在（协议层还没攻下），但**用户侧不再感到“卡住不动”**——空档由 binder 填满。
+
+## 代码审计记录（2026-11-02 夜间）
+
+逐模块检查后修掉的真实缺陷（每条都有真机复现或代码级证据）：
+
+| # | 位置 | 缺陷 | 现象 | 修复版本 |
+|---|---|---|---|---|
+| 1 | `MainActivity:73` | 冷启动无条件 `setFullNative(true)` | 一进去就全屏，页签/设置点不到，像“出不来” | 1.26.6 |
+| 2 | `NativePanel:205` | `frames % 120 == 0` 每 ≈2 秒强制全屏 | 用着用着自己弹回全屏 | 1.26.5 |
+| 3 | `Radio.startRcProIfAny` | 构造与 `setDumlOn` 各调一次，桥线程/`RcProStick` 双份 | 双份 `transact(4)` 抢 binder，推几下卡死 | 1.27.2 |
+| 4 | `Radio` 补帧分支 | 写 `duml.connected=true` / `lastStickMs` | 补一帧就被误判“TCP 新鲜”，binder 停手；状态栏假在线 | 1.27.2 |
+| 5 | `SetPage.draw` | 首行 `drawColor` 擦全画布 | 设置页盖掉页签栏 | 1.23.x |
+| 6 | adb 钩子 | 全屏态下打不进 UI | 自动化点击全部无效 | 1.26.3 |
+| 7 | `StickSmooth.value` | `d*k + d*ex` 会越过 `cur` | **快速推杆来回抽搐** | 1.27.4 |
+| 8 | `HidJoystick` | 写失败只置 `open=false`，`out` 不关；`open()` 又新建流 | **fd 泄漏 → PC 认设备但摇杆不动** | 1.27.4 |
+| 9 | `RadioView.onDraw` | 每帧 `new RectF(...)` | 全屏下持续分配，GC 抖动=偶发“卡一下” | 1.27.5 |
+
+已知但未修（如实记录）：
+
+- `127.0.0.1:40007` 每 3~6 秒被 `dji_link` RST，协议层订阅细节未攻下；已用 binder 补帧缓解（见上）。
+- 蓝牙 HID 设备模式：本机蓝牙栈只有 `HidHostService`，无 `HidDeviceService`，**不可行**。
+- HID 手柄需一次性 root 授权（建 USB gadget 是内核操作）；授权被拒时右下角会提示「已被拒绝超级用户权限」。

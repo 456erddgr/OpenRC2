@@ -25,6 +25,7 @@ public final class RadioView extends View {
     private float tabX0, tabW2;
     private final RectF topBar = new RectF();
     private final RectF content = new RectF();
+    private final RectF fullRect = new RectF();
     private final SparseArray<Panel> owners = new SparseArray<Panel>();
     private final SparseArray<Float> lastX = new SparseArray<Float>();
     private int page;
@@ -219,7 +220,8 @@ public final class RadioView extends View {
         long now = System.nanoTime();
         if (lastInputNs != 0) { lastDrawNs = (now - lastInputNs) / 1000000L; lastInputNs = 0; }
         if (full) {
-            ui.fill(c, new RectF(0, 0, getWidth(), getHeight()), 0xFF000000);
+            fullRect.set(0, 0, getWidth(), getHeight());   // 复用，避免每帧 new RectF（GC 抖动=卡一下）
+            ui.fill(c, fullRect, 0xFF000000);
             panels[IDX_NATIVE].draw(c, ui, content);
             // 合成按键条：半透明，压在核心画面底部
             for (int i = 0; i < OPEN_COUNT; i++) {
