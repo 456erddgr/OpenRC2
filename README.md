@@ -169,3 +169,22 @@ ETX_SO=/path/to/libetx.so ./scripts/build-apk.sh 1.23.0
 装 priv-app 授 `BLUETOOTH_PRIVILEGED` 同样无效 —— 需要替换系统蓝牙栈（BlueZ/Bumble 走 HCI 直通），不在本项目范围。
 
 USB HID 手柄（`/dev/hidg0`）不受影响，仍是模拟器首选方案。
+
+### 断连实测（1.26.7，24 秒窗口）
+
+```
+$ adb logcat -d | grep ETX-Duml | grep -c connected      → 5
+$ adb logcat -d | grep ETX-Duml | grep -cE "EOF|reset"   → 4
+11-02 02:34:07.485  W ETX-Duml: link down: SocketException: Connection reset
+11-02 02:34:07.498  I ETX-Duml: connected 127.0.0.1:40007
+```
+
+结论：稳定复现 **~6 秒一次 RST**，客户端 **13 ms** 内重连成功。
+由于每次重连都能立刻收到摇杆帧，数据本身没丢，影响集中在“帧率在 6 秒边界上掉一帧”，
+`StickSmooth` 的断线桥接（`gap > 250ms` 时从新位置起步）负责不产生跳变。
+
+### 开机落在哪一页
+
+冷启动默认进「原生」页（EdgeTX 实时画面）+ 顶部七页签；
+App 已在运行时再 `am start` 只走 `onNewIntent`，**不会重置当前页签**——
+所以用 adb 钩子连续操作时会停在你上次停留的页，这是设计行为，不是 bug。
