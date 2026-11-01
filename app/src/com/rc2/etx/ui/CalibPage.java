@@ -114,7 +114,13 @@ public class CalibPage extends Panel {
             }
             if (centered) {
                 if (cenT == 0) cenT = now;
-                for (int i = 0; i < 10; i++) cenSum[i] += c.raw[i];
+                // 审计修复：以前这里对全部 10 轴取平均并回写 c.mid[]，
+                // 旋钮/拨盘常年停在 -1/1，被平均成 -1 后 EdgeTX 就有一个通道卡在 -1
+                // —— 正是用户说的「回中后还有一个是 -1」。只累计已绑定的四根轴。
+                for (int s = 0; s < 4; s++) {
+                    int a = bind[s];
+                    if (a >= 0) cenSum[a] += c.raw[a];
+                }
                 cenN++;
                 if (now - cenT >= CEN_MS) finish();
             } else cenT = 0;
@@ -125,8 +131,8 @@ public class CalibPage extends Panel {
     /** 仅测试：跳过物理推杆，用给定峰值直接完成一次校准（验证落盘与同步）。 */
     public void forceFinishForTest(float m) {
         Calib c = radio.calib;
-        for (int i = 0; i < 10; i++) c.mid[i] = c.raw[i];
-        int[] auto = {1, 2, 3, 0};      // 油门/LY 副翼/RX 俯仰/RY 偏航/LX 的常见绑定
+        int[] auto = {1, 2, 3, 0};
+        for (int s0 = 0; s0 < 4; s0++) c.mid[auto[s0]] = c.raw[auto[s0]];   // 只写四根轴      // 油门/LY 副翼/RX 俯仰/RY 偏航/LX 的常见绑定
         for (int s = 0; s < 4; s++) { bind[s] = auto[s]; peak[s] = m; hits[s] = PEAKS; }
         finish();
     }
@@ -146,7 +152,7 @@ public class CalibPage extends Panel {
             c.reverse[a] = false;
             c.moved[a] = true;
         }
-        if (cenN > 0) for (int i = 0; i < 10; i++) c.mid[i] = (float) (cenSum[i] / cenN);
+        // 只写已绑定轴的中位（其余轴保持出厂值，避免把旋钮写成 -1）
         c.enabled = true;
         // 同步进核心：①缩小 raw 行程，让实测峰值成为新的满行程（RC Pro 推不满的根因）
         // ②重设输入缓存，让 EdgeTX 立刻用上新中位/新行程
