@@ -1,0 +1,559 @@
+package com.rc2.etx;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.hardware.usb.UsbManager;
+import android.os.BatteryManager;
+import android.os.Bundle;
+import android.text.InputType;
+import android.util.Log;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.widget.EditText;
+import android.widget.Toast;
+
+import com.rc2.etx.diag.DeviceInfo;
+import com.rc2.etx.diag.RootShell;
+import com.rc2.etx.diag.SelfTest;
+import com.rc2.etx.jni.CrossCheck;
+import com.rc2.etx.jni.NativeProbe;
+import com.rc2.etx.radio.NullSink;
+import com.rc2.etx.radio.Radio;
+import com.rc2.etx.radio.Store;
+import com.rc2.etx.radio.UdpSink;
+import com.rc2.etx.ui.Host;
+import com.rc2.etx.ui.RadioView;
+import com.rc2.etx.usb.UsbSerial;
+import com.rc2.etx.usb.UsbSerialSink;
+
+import java.io.File;
+import java.io.FileOutputStream;
+
+public class MainActivity extends Activity implements Host {
+
+    private static final String TAG = "ETX-Main";
+    private Radio radio;
+    private RadioView view;
+
+    private final BroadcastReceiver usbRx = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (UsbSerial.ACTION_PERMISSION.equals(i.getAction())) {
+                boolean ok = i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
+                toast(ok ? "USB 已授权，可以点「应用并打开」了" : "USB 授权被拒绝");
+            }
+        }
+    };
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        radio = Radio.get(this);
+        radio.start();
+        // 真实电池电压：Android 电池服务（adbshell dumpsys battery 里也能看到，实测 4206mV）
+        IntentFilter bf = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        Intent bs = registerReceiver(new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent i) {
+                radio.vbatMv = i.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+            }
+        }, bf);
+        if (bs != null) radio.vbatMv = bs.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+        Log.i("ETX-Main", "vbat=" + radio.vbatMv + "mV");
+        view = new RadioView(this, radio, this);
+        // 开机直接进"原版 EdgeTX 全屏"：这才是用户要的那个系统；
+        // 顶栏/页签仍在，点右上角"退出全屏"就回到七页签视图。
+        initUsbWatcher();
+        view.setPage(0);
+        view.setFullNative(true);
+        setContentView(view, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        try {
+            registerReceiver(usbRx, new IntentFilter(UsbSerial.ACTION_PERMISSION));
+        } catch (Throwable t) {
+            Log.w(TAG, "注册 USB 广播失败: " + t);
+        }
+        handleIntent(getIntent());
+        startLiveDump();
+    }
+
+    /** 每 15 秒把最新摇杆采样落盘，这样用户什么时候拨杆都能事后取到。 */
+    private void startLiveDump() {
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        h.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (radio.dumlOn) {
+                        writeReport("duml_live.txt",
+                                "stick=" + radio.duml.stickFrames
+                                + " frames=" + radio.duml.frames
+                                + " bad=" + radio.duml.badFrames
+                                + " connected=" + radio.duml.connected
+                                + (char) 10 + radio.duml.dumpSamples());
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "live dump: " + t);
+                }
+                h.postDelayed(this, 15000);
+            }
+        }, 15000);
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        handleIntent(i);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!radio.isRunning()) radio.start();
+    }
+
+    @Override
+    protected void onDestroy() {
+        try { if (usbStateRx != null) unregisterReceiver(usbStateRx); } catch (Throwable ignore) { }
+        try {
+            unregisterReceiver(usbRx);
+        } catch (Throwable ignore) {
+        }
+        radio.save();
+        radio.stop();
+        super.onDestroy();
+    }
+
+    /** adb 触发的无界面入口：--es action selftest|page|sink|info|root */
+    /** 汇总一个输入设备：EV 掩码 + 摇杆轴解码。 */
+    private static void flushDev(StringBuilder sb, String name, String handler, long ev, long abs) {
+        if ("?".equals(name)) return;                 // 文件开头的伪块
+        // Linux 输入子系统 EV 位： SYN=0x01 KEY=0x02 REL=0x04 ABS=0x08 MSC=0x10
+        boolean hasAbs = (ev & 0x08L) != 0;
+        // ABS 位： X=0 Y=1 Z=2 RX=3 RY=4 RZ=5 THROTTLE=19 RUDDER=20 WHEEL=21 GAS=22 BRAKE=23 HAT_X=16 HAT_Y=17
+        int[] codes = {0, 1, 2, 3, 4, 5, 16, 17, 19, 20, 21, 22, 23,
+                       47, 48, 49, 50, 53, 54, 57, 58};
+        String[] ax = {"X", "Y", "Z", "RX", "RY", "RZ", "HAT_X", "HAT_Y", "THR", "RUD", "WHEEL", "GAS", "BRAKE",
+                       "MT_SLOT", "MT_TOUCH_MAJOR", "MT_ORIENTATION", "MT_WIDTH_MAJOR",
+                       "MT_POSITION_X", "MT_POSITION_Y", "MT_TRACKING_ID", "MT_PRESSURE"};
+        StringBuilder got = new StringBuilder();
+        for (int i = 0; i < codes.length; i++) {
+            if (abs >= 0 && (abs & (1L << codes[i])) != 0) {
+                if (got.length() > 0) got.append(',');
+                got.append(ax[i]);
+            }
+        }
+        boolean analog = abs >= 0 && (abs & 0x3FL) != 0;   // X,Y,Z,RX,RY,RZ
+        boolean stickLike = hasAbs && analog;
+        sb.append("  >> ").append(stickLike ? "STICK-CAPABLE " : "")
+          .append("name=").append(name)
+          .append(" ev=").append(ev < 0 ? "?" : Long.toHexString(ev))
+          .append(" hasABS=").append(hasAbs)
+          .append(" axes=").append(got.length() == 0 ? "(none)" : got.toString())
+          .append((char) 10);
+    }
+
+    // ===== USB 插入 -> 三选项（对齐原版 EdgeTX 的"手柄/存储/串口"对话框）=====
+    private android.content.BroadcastReceiver usbStateRx;
+    private volatile int usbConnected = -1;
+    private boolean usbDialogShown;
+    private com.rc2.etx.ui.UsbDialog usbDlg;
+
+    private void initUsbWatcher() {
+        usbStateRx = new android.content.BroadcastReceiver() {
+            public void onReceive(Context c, Intent it) {
+                int cs = it.getIntExtra("connected", 0);
+                if (usbConnected < 0) { usbConnected = cs; return; }   // 首次只记状态，不弹
+                if (cs == 1 && usbConnected == 0) showUsbModeDialog();  // 只在 0->1 弹
+                usbConnected = cs;
+            }
+        };
+        IntentFilter f = new IntentFilter("android.hardware.usb.action.USB_STATE");
+        registerReceiver(usbStateRx, f);
+        // 已经插着线时（App 后启动）也要弹一次：线一直插着不会有 0->1 广播，
+        // 之前只等广播导致"插着永远不弹"（m05206）。
+        android.os.BatteryManager bm = (android.os.BatteryManager) getSystemService(BATTERY_SERVICE);
+        final boolean plugged = bm != null && bm.isCharging()
+                && getIntent() != null && getIntent().getStringExtra("action") == null;
+        if (plugged) {
+            usbConnected = 1;
+            new android.os.Handler(getMainLooper()).postDelayed(new Runnable() {
+                public void run() {
+                    showUsbModeDialog();
+                    new android.os.Handler(getMainLooper()).postDelayed(new Runnable() {
+                        public void run() {
+                            try { if (usbDlg != null && usbDlg.isShowing()) usbDlg.dismiss(); } catch (Throwable ignore) { }
+                        }
+                    }, 20000);
+                }
+            }, 1500);
+        }
+    }
+
+    private static final String NL = String.valueOf((char) 10);
+
+    private void showHidHelpDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("把遥控器变成 USB 游戏手柄")
+                .setMessage("这一步只需要做一次（建 USB 手柄需要 root 层，Android 侧没有公开接口）。" + NL + "" + NL + "方法一（推荐，什么都不用装）：" + NL + "  双击软件目录里的 pc - RC2-USB手柄-开启.bat（电脑需能跑 adb devices）。" + NL + "" + NL + "方法二（命令行）：" + NL + "  adb shell su -c sh /data/local/tmp/usbjoy/setup.sh" + NL + "" + NL + "成功标志：电脑「设备和打印机」里出现 HID-compliant game controller，" + NL + "之后每次插线在这里选「游戏手柄」就能直接用（不必再 root）。" + NL + "" + NL + "想恢复 USB 传文件/调试：选「文件存储 / USB 调试」，" + NL + "或双击 pc - RC2-USB手柄-还原.bat。")
+                .setPositiveButton("知道了", null)
+                .setNeutralButton("仍要尝试 root 执行", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        String r = com.rc2.etx.usb.UsbGadget.setup(MainActivity.this);
+                        toast("结果：" + (r.length() > 120 ? r.substring(0, 120) : r));
+                    }
+                })
+                .show();
+    }
+
+    private void showUsbModeDialog() {
+        if (usbDialogShown || isFinishing()) return;
+        usbDialogShown = true;
+        usbDlg = new com.rc2.etx.ui.UsbDialog(this, new com.rc2.etx.ui.UsbDialog.Pick() {
+            public void onPick(int which) {
+                usbDialogShown = false;
+                if (which == 0) {
+                    // 绝不在 App 里直接 su：这个 ROM 上 su 会弹授权框，
+                    // 且构建 gadget 期间若有脚本去抢 UDC 会导致内核重启。
+                    // 只做两件事：①已有 /dev/hidg0 就直接用；②否则给出电脑端一键脚本的指引。
+                    if (com.rc2.etx.usb.UsbGadget.hasHidNode()) {
+                        radio.setHidOn(true);
+                        toast("已是手柄模式，直接在模拟器里选 HID-compliant game controller");
+                    } else {
+                        showHidHelpDialog();
+                    }
+                } else if (which == 1) {
+                    radio.setHidOn(false);
+                    com.rc2.etx.usb.UsbGadget.restore(MainActivity.this);
+                    toast("已还原为文件存储 / USB 调试");
+                } else if (which == 2) {
+                    toast("串口模式暂未实现");
+                }
+            }
+        });
+        usbDlg.show();
+    }
+
+    private void handleIntent(Intent i) {
+        if (i == null) return;
+        String act = i.getStringExtra("action");
+        if (act == null) return;
+        Log.i(TAG, "intent action=" + act);
+        if ("selftest".equals(act)) {
+            runSelfTest();
+        } else if ("info".equals(act)) {
+            String info = DeviceInfo.collect(this);
+            Log.i(TAG, info);
+            writeReport("devices.txt", info);
+            view.setPage(4);
+            toast("设备信息已写入文件");
+        } else if ("root".equals(act)) {
+            RootShell.runAsync("id; uname -a; getprop ro.build.version.release", new RootShell.Cb() {
+                @Override
+                public void done(String out) {
+                    Log.i(TAG, "root: " + out);
+                    writeReport("root.txt", out);
+                }
+            });
+        } else if ("duml".equals(act)) {
+            boolean on = i.getIntExtra("on", 1) != 0;
+            final long sec = Math.max(3, i.getIntExtra("sec", 5));
+            radio.setDumlOn(on);
+            view.setPage(5);
+            Log.i(TAG, "duml on=" + on);
+            if (on) {
+                // 5 秒后把摇杆状态写文件，方便 adb 无界面验证
+                view.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        String rep = "connected=" + radio.duml.connected
+                                + " err=" + radio.duml.err
+                                + " frames=" + radio.duml.frames
+                                + " stick=" + radio.duml.stickFrames
+                                + " bad=" + radio.duml.badFrames
+                                + " hz=" + radio.duml.hz
+                                + " raw=" + rawList(radio.duml.raw)
+                                + " sec=" + sec
+                                + " hex=" + radio.duml.lastHex
+                                + "\nus=" + usList(radio.usSnapshot());
+                        Log.i(TAG, "DUML-REPORT " + rep);
+                        writeReport("duml.txt", rep + (char) 10 + "---- 帧类型普查 ----" + (char) 10
+                                + radio.duml.census() + (char) 10 + "---- 摇杆采样 ----" + (char) 10
+                                + radio.duml.dumpSamples());
+                    }
+                }, sec * 1000L);
+            }
+        } else if ("native".equals(act)) {
+            view.setPage(1);
+            final String rep = NativeProbe.run(this, radio);
+            Log.i(TAG, "NATIVE-REPORT " + rep);
+            writeReport("native.txt", rep);
+            toast("原生核心自检已写入 native.txt");
+        } else if ("yml".equals(act)) {
+            final String rep = (radio.yml == null ? "(未加载)" : radio.yml.summary());
+            Log.i(TAG, "YML-REPORT " + rep);
+            writeReport("radioyml.txt", rep);
+            toast("radio.yml 解析结果已写入 radioyml.txt");
+        } else if ("key".equals(act)) {
+            final int k = i.getIntExtra("k", 4);
+            // 确定性投递：先按下，60ms 后松开（同帧 down+up 会被 keysPollingCycle 漏掉）
+            com.rc2.etx.jni.EtxNative.press(k);
+            view.postDelayed(new Runnable() {
+                public void run() { com.rc2.etx.jni.EtxNative.release(k); }
+            }, 60);
+            Log.i(TAG, "press " + k + " (release in 60ms)");
+        } else if ("rotary".equals(act)) {
+            // 旋钮钩子：n>0 顺时针 n 格，n<0 逆时针 |n| 格（供命令行验页内滚动/改值）
+            final int n = i.getIntExtra("n", 1);
+            final int step = n >= 0 ? 1 : -1;
+            for (int q = 0; q < Math.abs(n); q++) {
+                com.rc2.etx.jni.EtxNative.turn(step);
+            }
+            Log.i(TAG, "rotary n=" + n);
+        } else if ("usbmenu".equals(act)) {
+            usbDialogShown = false;
+            showUsbModeDialog();
+        } else if ("hid".equals(act)) {
+            final boolean on = i.getIntExtra("on", 1) != 0;
+            radio.setHidOn(on);
+            android.util.Log.i(TAG, "hid on=" + on + " open=" + radio.hid.isOpen()
+                    + " err=" + radio.hid.error());
+            writeReport("hid.txt", "on=" + on + " | open=" + radio.hid.isOpen()
+                    + " | reports=" + radio.hid.reports() + " | " + radio.hid.stats() + " | err=" + radio.hid.error());
+        } else if ("fullmode".equals(act)) {
+            com.rc2.etx.ui.NativePanel.FORCE_FULL = i.getIntExtra("on", 1) != 0;
+            Log.i(TAG, "FORCE_FULL=" + com.rc2.etx.ui.NativePanel.FORCE_FULL);
+            toast("整屏重绘 " + (com.rc2.etx.ui.NativePanel.FORCE_FULL ? "开" : "关"));
+        } else if ("touch".equals(act)) {
+            // 可复现的触摸注入钩子：本 ROM 上 `adb shell input tap` 经常被吞掉
+            // （getevent 抓不到内核事件），所以提供一条确定能到 libetx 的路。
+            final int tx = i.getIntExtra("tx", 240);
+            final int ty = i.getIntExtra("ty", 88);
+            // action 码与 libetx 约定一致：0=DOWN 1=MOVE 2=UP
+            // 额外提供 act=tap（DOWN 40ms 后 UP）与 act=drag（DOWN→N×MOVE→UP）
+            final String mode = i.getStringExtra("act");
+            final int kind = i.getIntExtra("kind", -1);
+            final int moves = i.getIntExtra("moves", 0);
+            final int dy = i.getIntExtra("dy", 0);
+            try {
+                if ("tap".equals(mode)) {
+                    com.rc2.etx.jni.EtxNative.touch(0, tx, ty);
+                    view.postDelayed(new Runnable() { public void run() {
+                        com.rc2.etx.jni.EtxNative.touch(2, tx, ty); } }, 40);
+                    Log.i(TAG, "touch tap tx=" + tx + " ty=" + ty);
+                } else if ("drag".equals(mode)) {
+                    com.rc2.etx.jni.EtxNative.touch(0, tx, ty);
+                    final int n = moves > 0 ? moves : 6;
+                    for (int k = 1; k <= n; k++) {
+                        final int yy = ty + dy * k / n;
+                        view.postDelayed(new Runnable() { public void run() {
+                            com.rc2.etx.jni.EtxNative.touch(1, tx, yy); } }, 16 * k);
+                    }
+                    view.postDelayed(new Runnable() { public void run() {
+                        com.rc2.etx.jni.EtxNative.touch(2, tx, ty + dy); } }, 16 * (n + 1));
+                    Log.i(TAG, "touch drag tx=" + tx + " ty=" + ty + " dy=" + dy);
+                } else {
+                    int a = kind >= 0 ? kind : 0;
+                    com.rc2.etx.jni.EtxNative.touch(a, tx, ty);
+                    Log.i(TAG, "touch injected tx=" + tx + " ty=" + ty + " kind=" + a);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "touch inject failed: " + t);
+            }
+        } else if ("tap".equals(act)) {
+            final String rep = com.rc2.etx.jni.TapProbe.run(this, i.getIntExtra("tx", 240), i.getIntExtra("ty", 88));
+            writeReport("tap.txt", rep);
+            Log.i(TAG, "TAP-REPORT " + rep.replace((char) 10, '|'));
+        } else if ("keys".equals(act)) {
+            final String rep = com.rc2.etx.jni.NativeProbe.runKeys(this);
+            writeReport("keys.txt", rep);
+        } else if ("menu".equals(act)) {
+            final String rep = com.rc2.etx.jni.NativeProbe.runMenu(this);
+            writeReport("menu.txt", rep);
+        } else if ("devices".equals(act)) {
+            // 列出本机可枚举的输入设备（判断有没有外接手柄）
+            StringBuilder sb = new StringBuilder();
+            sb.append("=== Android InputDevice (public API) ===").append((char) 10);
+            try {
+                int[] ids = android.view.InputDevice.getDeviceIds();
+                sb.append("count=").append(ids == null ? 0 : ids.length).append((char) 10);
+                if (ids != null) {
+                    for (int id : ids) {
+                        android.view.InputDevice d = android.view.InputDevice.getDevice(id);
+                        if (d == null) continue;
+                        int sc = d.getSources();
+                        // 注意：SOURCE_GAMEPAD 含 SOURCE_CLASS_BUTTON/KEYBOARD 位，
+                        // 用它会把键盘/电源键判成手柄；只认 class 级 JOYSTICK / GAMEPAD。
+                        boolean pad = (sc & (0x00000010 | 0x00000400)) != 0;
+                        sb.append(pad ? "GAMEPAD " : "        ")
+                          .append("id=").append(d.getId())
+                          .append(" name=").append(d.getName())
+                          .append(" sources=0x").append(Integer.toHexString(sc))
+                          .append((char) 10);
+                    }
+                }
+            } catch (Throwable t) {
+                sb.append("ERR ").append(t.toString()).append((char) 10);
+            }
+            sb.append("=== /proc/bus/input/devices ===").append((char) 10);
+            try {
+                java.io.BufferedReader br = new java.io.BufferedReader(
+                        new java.io.InputStreamReader(new java.io.FileInputStream("/proc/bus/input/devices")));
+                String ln;
+                String curName = "?";
+                String curHandler = "";
+                long evMask = -1, absMask = -1;
+                while ((ln = br.readLine()) != null) {
+                    String t2 = ln.trim();
+                    if (t2.startsWith("N:")) {
+                        flushDev(sb, curName, curHandler, evMask, absMask);
+                        int q1 = t2.indexOf('"');
+                        int q2 = q1 >= 0 ? t2.indexOf('"', q1 + 1) : -1;
+                        curName = (q1 >= 0 && q2 > q1) ? t2.substring(q1 + 1, q2) : t2;
+                        curHandler = "";
+                        evMask = -1; absMask = -1;
+                    } else if (t2.startsWith("H:")) {
+                        curHandler = t2;
+                    } else if (t2.startsWith("B: EV=")) {
+                        try { evMask = Long.parseLong(t2.substring(6).trim(), 16); } catch (Throwable ig) { evMask = -1; }
+                    } else if (t2.startsWith("B: ABS=")) {
+                        // 内核打印的是两个 32 位字，**高位在前**："B: ABS=6658000 0"
+                        // → 高字 0x06658000（位 15,16,18,21,22,25,26）+ 低字 0
+                        //   = ABS 位 47,48,50,53,54,57,58（MT_SLOT/TOUCH_MAJOR/…/PRESSURE）
+                        try {
+                            String[] w = t2.substring(8).trim().split("[ \t]+");
+                            long hi = Long.parseLong(w[0], 16);
+                            long lo = w.length > 1 ? Long.parseLong(w[1], 16) : 0L;
+                            absMask = (hi << 32) | lo;
+                        } catch (Throwable ig) { absMask = -1; }
+                    }
+                    sb.append(ln).append((char) 10);
+                }
+                flushDev(sb, curName, curHandler, evMask, absMask);
+                br.close();
+            } catch (Throwable t) {
+                sb.append("ERR ").append(t.toString()).append((char) 10);
+            }
+            view.setPage(1);
+            writeReport("devices.txt", sb.toString());
+        } else if ("calibstart".equals(act)) {
+            view.debugBeginCalib();
+        } else if ("crosscheck".equals(act)) {
+            view.setPage(1);
+            final String rep = CrossCheck.run(this, radio);
+            Log.i(TAG, "K5-REPORT " + rep);
+            writeReport("crosscheck.txt", rep);
+            toast("K5 交叉校验已写入 crosscheck.txt");
+        } else if ("full".equals(act)) {
+            final boolean on = i.getIntExtra("on", 0) != 0;
+            view.post(new Runnable() { public void run() { view.setFullNative(on); } });
+            Log.i(TAG, "intent action=full on=" + on);
+        } else if ("page".equals(act)) {
+            view.setPage(i.getIntExtra("p", 0));
+        } else if ("sink".equals(act)) {
+            String kind = i.getStringExtra("kind");
+            String target = i.getStringExtra("target");
+            int baud = i.getIntExtra("baud", 420000);
+            if ("udp".equals(kind)) {
+                UdpSink u = new UdpSink();
+                boolean ok = u.open(target == null ? "255.255.255.255:8888" : target);
+                radio.setSink(u);
+                Log.i(TAG, "sink udp ok=" + ok + " " + u.status());
+            } else if ("usb".equals(kind)) {
+                UsbSerialSink us = new UsbSerialSink(this);
+                us.setBaud(baud);
+                boolean ok = us.open("auto");
+                radio.setSink(us);
+                Log.i(TAG, "sink usb ok=" + ok + " " + us.status() + " | " + us.trace());
+            } else {
+                radio.setSink(new NullSink());
+            }
+        }
+    }
+
+    private static String rawList(int[] a) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < a.length; i++) sb.append(i == 0 ? "" : ",").append(a[i]);
+        return sb.append(']').toString();
+    }
+
+    private static String usList(int[] a) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < a.length; i++) sb.append(i == 0 ? "" : ",").append(a[i]);
+        return sb.append(']').toString();
+    }
+
+    private void runSelfTest() {
+        final String rep;
+        rep = SelfTest.run();
+        Log.i(TAG, "SELFTEST\n" + rep);
+        String path = writeReport("selftest.txt", rep + "\n---- 设备 ----\n" + DeviceInfo.collect(this));
+        view.setPage(4);
+        int fail = 0;
+        for (String line : rep.split("\n")) {
+            if (line.startsWith("FAIL")) fail++;
+        }
+        toast(fail == 0 ? ("自检全部通过，报告 " + path) : ("自检有 " + fail + " 项失败，报告 " + path));
+    }
+
+    private String writeReport(String name, String content) {
+        try {
+            File dir = getExternalFilesDir(null);
+            if (dir == null) dir = getFilesDir();
+            if (!dir.exists()) dir.mkdirs();
+            File f = new File(dir, name);
+            FileOutputStream fo = new FileOutputStream(f);
+            fo.write(content.getBytes("UTF-8"));
+            fo.close();
+            return f.getAbsolutePath();
+        } catch (Throwable t) {
+            Log.w(TAG, "写报告失败: " + t);
+            return "(写入失败)";
+        }
+    }
+
+    @Override
+    public void toast(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void prompt(String title, String initial, boolean numeric, final Host.PromptCb cb) {
+        final EditText et = new EditText(this);
+        et.setText(initial == null ? "" : initial);
+        et.setSelectAllOnFocus(true);
+        if (numeric) et.setInputType(InputType.TYPE_CLASS_NUMBER);
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(et)
+                .setPositiveButton("确定", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int w) {
+                        cb.onResult(et.getText().toString());
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    @Override
+    public void onSettingsChanged() {
+        radio.save();
+        view.invalidate();
+    }
+
+    @Override
+    public void invalidateUi() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                view.invalidate();
+            }
+        });
+    }
+}

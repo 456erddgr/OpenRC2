@@ -1,0 +1,27 @@
+# 构建产物
+dist/
+build/
+out/
+obj/
+*.apk
+*.aab
+*.dex
+*.idsig
+
+# 编译中间物
+app/jniLibs/
+tmpfix/
+lab/
+re/
+
+# 截图与临时文件（保留 docs/img 下的正式截图）
+/shot-*.png
+/icon-preview-*.png
+/tmp/
+*.log
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
