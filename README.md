@@ -188,3 +188,21 @@ $ adb logcat -d | grep ETX-Duml | grep -cE "EOF|reset"   → 4
 冷启动默认进「原生」页（EdgeTX 实时画面）+ 顶部七页签；
 App 已在运行时再 `am start` 只走 `onNewIntent`，**不会重置当前页签**——
 所以用 adb 钩子连续操作时会停在你上次停留的页，这是设计行为，不是 bug。
+
+### 3~6 秒 RST 的缓解（1.27.0）：TCP + Binder 双源
+
+RC2 上同样存在大疆的 `com.dji.protocol.IProtocolManager`（`service list | grep protocol` 可见）。
+本版把摇杆做成**双源**：
+
+- 正常情况下 `127.0.0.1:40007` 的 TCP 帧优先（约 9 Hz，延迟最低）；
+- 一旦 TCP 超过 **220 ms** 没有新帧（`dji_link` 每次 RST 的空档），立刻用 binder 通道
+  （`transact(4)` → `IPackListener` 回调，实测 6 通道、中位 1024、约 6 Hz）补上。
+
+实测日志：
+
+```
+I ETX-Radio: binder 补帧 #2
+I ETX-Radio: binder 补帧 #3
+```
+
+意义：RST 仍然存在（协议层还没攻下），但**用户侧不再感到“卡住不动”**——空档由 binder 填满。

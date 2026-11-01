@@ -41,6 +41,7 @@ public class RcProService extends Service {
     };
 
     private volatile boolean transactBusy;
+    private int cbLog;
     private final List<Messenger> clients = new ArrayList<Messenger>();
     private volatile int[] lastValues;
     private volatile long lastAt;
@@ -71,6 +72,11 @@ public class RcProService extends Service {
                 int[] vals = new int[6];
                 for (int k = 0; k < 6; k++) {
                     vals[k] = ((bytes[k * 2] & 0xFF) | ((bytes[k * 2 + 1] & 0xFF) << 8));
+                }
+                if (cbLog < 6) {
+                    cbLog++;
+                    Log.i(TAG, "chan=" + vals[0] + "," + vals[1] + "," + vals[2]
+                            + "," + vals[3] + "," + vals[4] + "," + vals[5] + " bytes=" + bytes.length);
                 }
                 lastValues = vals;
                 lastAt = System.currentTimeMillis();

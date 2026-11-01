@@ -45,6 +45,7 @@ public final class Radio {
     /** RC Pro(RM510) 的 binder 摇杆源；非空时由 rcBridge 把值搬进 duml.raw。 */
     private com.rc2.etx.input.RcProStick rcpro;
     private Thread rcBridge;
+    private int gapFills;
 
     /** 是否启用手内摇杆输入。 */
     public volatile boolean dumlOn;
@@ -366,15 +367,27 @@ public final class Radio {
                         com.rc2.etx.input.RcProStick r = rcpro;
                         if (r != null && dumlOn) {
                             if (r.connected) {
-                                int[] v = r.raw;
-                                int[] d = duml.raw;
-                                if (v != null && d != null) {
-                                    int n = Math.min(6, Math.min(v.length, d.length));
-                                    for (int i = 0; i < n; i++) d[i] = v[i];
+                                // 混合源：TCP(9Hz) 新鲜时让它作主；TCP 超过 220ms 没帧
+                                // （dji_link 每 3~6 秒 RST 一次的空档）就用 binder(≈6Hz) 顶上，
+                                // 这样断连期间摇杆不再"卡住不动"。
+                                long now2 = System.currentTimeMillis();
+                                boolean tcpFresh = duml.connected
+                                        && (now2 - duml.lastStickMs) < 220;
+                                if (!tcpFresh) {
+                                    int[] v = r.raw;
+                                    int[] d = duml.raw;
+                                    if (v != null && d != null) {
+                                        int n = Math.min(6, Math.min(v.length, d.length));
+                                        for (int i = 0; i < n; i++) d[i] = v[i];
+                                    }
+                                    duml.connected = true;
+                                    duml.stickFrames = r.frames;
+                                    duml.lastStickMs = now2;
+                                    gapFills++;
+                                    if (gapFills <= 3 || gapFills % 500 == 0) {
+                                        Log.i(TAG, "binder 补帧 #" + gapFills);
+                                    }
                                 }
-                                duml.connected = true;
-                                duml.stickFrames = r.frames;
-                                duml.lastStickMs = System.currentTimeMillis();
                             }
                         }
                         Thread.sleep(10);

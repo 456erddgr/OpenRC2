@@ -57,6 +57,10 @@ public final class DumlStick {
     private final java.util.LinkedHashMap<String, String> seen =
             new java.util.LinkedHashMap<String, String>();
     private final StringBuilder samples = new StringBuilder();
+    // 读端饥饿诊断：记录相邻两帧的间隔，RST 前若出现长空洞即为读线程饥饿
+    private long lastFrameAtMs;
+    private long maxGapMs;
+    private int gapOver150;
     private long sampleT0 = -1;
     private final java.util.LinkedHashMap<String, Integer> cnt =
             new java.util.LinkedHashMap<String, Integer>();
@@ -322,6 +326,10 @@ public final class DumlStick {
             stickFrames++;
             stickHzCount++;
             lastStickMs = System.currentTimeMillis();
+            long gap = lastFrameAtMs == 0 ? 0 : lastStickMs - lastFrameAtMs;
+            lastFrameAtMs = lastStickMs;
+            if (gap > maxGapMs) maxGapMs = gap;
+            if (gap > 150) { gapOver150++; Log.w(TAG, "READ GAP " + gap + "ms (hungry?)"); }
             lastHex = hex(b, p, 12);
             if (sampleT0 < 0) sampleT0 = System.currentTimeMillis();
             if (samples.length() < 120000) {
@@ -459,6 +467,11 @@ public final class DumlStick {
     }
 
     /** 摇杆采样序列（ms,v0..v5 每行一条），用于离线拟合轴映射。 */
+    /** 读端饥饿统计：最大帧间隔与 >150ms 次数。 */
+    public String gapStats() {
+        return "maxGap=" + maxGapMs + "ms over150=" + gapOver150;
+    }
+
     public String dumpSamples() {
         return samples.length() == 0 ? "(无摇杆采样)" : samples.toString();
     }
