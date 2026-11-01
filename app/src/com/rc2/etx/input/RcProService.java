@@ -130,6 +130,10 @@ public class RcProService extends Service {
     }
 
     private void pollOnce() {
+        // 审计修复：重入保护必须放在最前面。以前写在 try 里，早退时 finally 仍会把
+        // transactBusy 清成 false —— 等于把**另一个线程**的锁放掉，双份 transact 又回来了。
+        if (transactBusy) return;
+        transactBusy = true;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -141,8 +145,6 @@ public class RcProService extends Service {
             }
             // 防重入：轮询定时器与重连线程可能同时进来，binder 服务端是单队列，
             // 并发 transact 会把队列塞满，表现就是"推几下就卡住不动"。
-            if (transactBusy) return;
-            transactBusy = true;
             IBinder binder = (IBinder) o;
             data.writeInterfaceToken(IFACE_PROTOCOL);
             data.writeInt(1);
