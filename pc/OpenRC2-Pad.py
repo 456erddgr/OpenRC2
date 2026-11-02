@@ -38,25 +38,28 @@ TXT, SUB = "#e6edf3", "#8b949e"
 AMBER, TEAL = "#f5b942", "#2dd4bf"
 
 
-def _adb():
+def _adb_exe():
+    """找 adb.exe：PATH -> 常见安装位置 -> 程序自带 platform-tools。"""
     for name in ("adb", "adb.exe"):
         q = shutil.which(name)
         if q:
             return q
+    here = os.path.dirname(os.path.abspath(__file__))
     cands = [
-        os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-toolsdb.exe"),
-        r"C:\platform-toolsdb.exe",
-        r"C:dbdb.exe",
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "platform-tools", "adb.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Android", "Sdk", "platform-tools", "adb.EXE"),
+        os.path.join("C:" + os.sep, "platform-tools", "adb.exe"),
+        os.path.join(here, "platform-tools", "adb.exe"),
+        os.path.join(getattr(sys, "_MEIPASS", here), "platform-tools", "adb.exe"),
     ]
     for c in cands:
-        if os.path.isfile(c):
+        if c and os.path.isfile(c):
             return c
     return None
 
 
 def _adb_run(args, timeout=12):
-    exe = _adb()
+    exe = _adb_exe()
     if not exe:
         return False, "找不到 adb.exe（把 platform-tools 放本程序同目录）"
     try:
@@ -345,8 +348,20 @@ class App(object):
         self.root.deiconify(); self.root.lift(); self.root.focus_force()
 
     # ---------- 外观：无边框 + 圆角 + 磨砂（Win10/11 acrylic） ----------
+    # ---------- adb ----------
+    def _adb(self, *args, **kw):
+        """跑一条 adb 命令，返回 (ok, 输出)。"""
+        return _adb_run(list(args), kw.get("timeout", 12))
+
     def _chrome(self):
         r = self.root
+        # 默认用系统标准窗口：能拖、能缩放、最小化/还原不乱、图标正常显示。
+        # 想看自绘标题条：设 OPENRC2_CHROME=1
+        if os.environ.get("OPENRC2_CHROME", "0") != "1":
+            r.title("OpenRC2 虚拟手柄")
+            r.resizable(True, True)
+            r.minsize(900, 620)
+            return
         r.overrideredirect(True)           # 去掉系统标题栏
         r.attributes("-topmost", False)
         try:
@@ -371,9 +386,16 @@ class App(object):
         tk.Button(bar, text="—", command=self._min, bg=INK, fg=SUB, bd=0,
                   activebackground="#2a3340", font=("Microsoft YaHei UI", 11),
                   padx=10).pack(side="right")
-        for wdg in (bar,):
-            wdg.bind("<Button-1>", self._drag0)
-            wdg.bind("<B1-Motion>", self._drag1)
+        def bind_drag(w):
+            if isinstance(w, tk.Button):
+                return
+            w.bind("<Button-1>", self._drag0)
+            w.bind("<B1-Motion>", self._drag1)
+            for ch in w.winfo_children():
+                bind_drag(ch)
+        bind_drag(bar)
+        # 小化后 overrideredirect 已关，恢复时要再打开
+        r.bind("<Map>", lambda e: (r.overrideredirect(True), r.update_idletasks()))
 
     def _drag0(self, e):
         self._d = (e.x_root - self.root.winfo_rootx(), e.y_root - self.root.winfo_rooty())
