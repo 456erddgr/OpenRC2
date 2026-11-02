@@ -1,0 +1,144 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<title>OpenRC2</title>
+<style>
+:root{
+  --ink:#070a0e; --card:rgba(22,27,34,.52); --stroke:rgba(255,255,255,.12);
+  --txt:#f2f5f8; --sub:#9aa4af; --amber:#f5b942; --teal:#2dd4bf; --blue:#60a5fa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font:14px/1.45 "SF Pro Display","Segoe UI Variable Display","Microsoft YaHei UI",system-ui;
+  color:var(--txt); background:#0a0d12; overflow:hidden;
+}
+#wall{position:fixed;inset:-40px;background-size:cover;background-position:center;
+  filter:blur(26px) saturate(130%) brightness(.55); transform:scale(1.1); z-index:0}
+#veil{position:fixed;inset:0;background:radial-gradient(120% 80% at 20% 0%,rgba(96,165,250,.16),transparent 60%),
+  radial-gradient(90% 70% at 90% 20%,rgba(244,114,182,.12),transparent 60%),rgba(6,9,14,.45);z-index:1}
+.app{position:relative;z-index:2;height:100%;padding:18px;display:grid;gap:14px;
+  grid-template-columns:minmax(300px,26%) 1fr;grid-template-rows:auto 1fr}
+.head{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:14px 18px;
+  background:var(--card);border:1px solid var(--stroke);border-radius:22px;
+  backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);
+  box-shadow:0 20px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.16)}
+.brand{font-size:24px;font-weight:800;letter-spacing:.2px}
+.brand span{font-weight:500;color:var(--sub);font-size:13px;margin-left:10px}
+.spacer{flex:1}
+.pill{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;
+  border:1px solid var(--stroke);background:rgba(255,255,255,.06);font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--amber);transition:background .2s}
+.dot.on{background:var(--teal);box-shadow:0 0 12px var(--teal)}
+.card{padding:16px 18px;border-radius:24px;background:var(--card);border:1px solid var(--stroke);
+  backdrop-filter:blur(34px) saturate(170%); -webkit-backdrop-filter:blur(34px) saturate(170%);
+  box-shadow:0 24px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.15);
+  display:flex;flex-direction:column;gap:14px;min-height:0}
+h3{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--sub);text-transform:uppercase}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.seg{display:flex;gap:6px;padding:4px;border-radius:14px;background:rgba(255,255,255,.05);
+  border:1px solid var(--stroke)}
+.seg button{flex:1;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--txt);
+  font:inherit;font-weight:600;cursor:pointer;transition:transform .12s cubic-bezier(.2,.9,.2,1),background .18s,color .18s}
+.seg button:hover{background:rgba(255,255,255,.09)}
+.seg button:active{transform:scale(.96)}
+.seg button.on{background:var(--teal);color:#06231b;box-shadow:0 6px 20px rgba(45,212,191,.35)}
+.bars{display:flex;flex-direction:column;gap:12px;min-height:0}
+.bar{display:grid;grid-template-columns:104px 1fr 52px;align-items:center;gap:12px}
+.bar b{font-weight:600;color:var(--sub);font-size:12.5px}
+.track{height:12px;border-radius:999px;background:rgba(255,255,255,.09);overflow:hidden;
+  position:relative;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#2dd4bf,#60a5fa);
+  transition:width .05s linear, background .3s; will-change:width}
+.fill.mid{background:linear-gradient(90deg,#f5b942,#f97316)}
+.val{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+.btns{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+.btn{padding:13px;border-radius:16px;border:1px solid var(--stroke);background:rgba(255,255,255,.07);
+  color:var(--txt);font:inherit;font-weight:700;cursor:pointer;
+  transition:transform .12s cubic-bezier(.2,.9,.2,1),background .18s,box-shadow .18s}
+.btn:hover{background:rgba(255,255,255,.13)}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:linear-gradient(180deg,#ffd479,#f5b942);color:#241a04;border-color:transparent;
+  box-shadow:0 12px 30px rgba(245,185,66,.35)}
+.btn.primary.running{background:linear-gradient(180deg,#ff9b9b,#ef4444);color:#2b0505;box-shadow:0 12px 30px rgba(239,68,68,.3)}
+.foot{grid-column:1/-1;display:flex;gap:12px;align-items:center;color:var(--sub);font-size:12px;padding:0 6px}
+.log{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mono{font-variant-numeric:tabular-nums}
+@media (max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}}
+</style>
+<div id="wall"></div><div id="veil"></div>
+<div class="app">
+  <div class="head">
+    <div class="brand">OpenRC2<span>虚拟手柄 · PC 端</span></div>
+    <div class="spacer"></div>
+    <div class="pill"><i class="dot" id="dot"></i><span id="st">等待遥控器</span></div>
+    <div class="pill mono"><span id="fps">0</span> fps · <span id="fr">0</span> 帧</div>
+  </div>
+
+  <div class="card">
+    <h3>手柄类型</h3>
+    <div class="seg" id="mode">
+      <button data-v="xbox" class="on">Xbox 360</button>
+      <button data-v="fvp">FVP 手感</button>
+    </div>
+    <h3>遥控器型号</h3>
+    <div class="seg" id="model">
+      <button data-v="0" class="on">自动</button>
+      <button data-v="1">RC2</button>
+      <button data-v="2">RC Pro</button>
+    </div>
+    <div class="btns">
+      <button class="btn primary" id="run">启 动</button>
+      <button class="btn" id="selftest">自检摇杆</button>
+      <button class="btn" id="joy">joy.cpl</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>摇杆实时数据（60fps · SSE）</h3>
+    <div class="bars" id="bars"></div>
+  </div>
+
+  <div class="foot"><span class="log" id="log">就绪</span><span class="mono" id="lat"></span></div>
+</div>
+<script>
+const NAMES=["左水平 · 偏航","左竖直 · 油门","右水平 · 副翼","右竖直 · 俯仰","左波轮","右波轮"];
+const bars=[];const host=document.getElementById('bars');
+NAMES.forEach((n,i)=>{
+  const d=document.createElement('div');d.className='bar';
+  d.innerHTML=`<b>${n}</b><div class="track"><div class="fill" id="f${i}"></div></div><div class="val" id="v${i}">1024</div>`;
+  host.appendChild(d);bars.push({f:document.getElementById('f'+i),v:document.getElementById('v'+i),cur:512});
+});
+let mode='xbox',model='0',running=false,last=performance.now(),shown=0;
+function post(cmd,extra){return fetch('/cmd',{method:'POST',headers:{'Content-Type':'application/json'},
+  body:JSON.stringify(Object.assign({cmd},extra||{}))}).then(r=>r.json()).catch(()=>({ok:false,msg:'网络错误'}));}
+document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#mode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  mode=b.dataset.v;post('mode',{v:mode});});
+document.querySelectorAll('#model button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#model button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+  model=b.dataset.v;post('model',{v:model}).then(r=>{if(!r.ok)log('型号同步失败：'+r.msg);});});
+const runBtn=document.getElementById('run');
+runBtn.onclick=async()=>{const r=await post(running?'stop':'start');log(r.msg);
+  if(r.ok){running=!running;runBtn.textContent=running?'停 止':'启 动';runBtn.classList.toggle('running',running);}};
+document.getElementById('selftest').onclick=()=>post('selftest').then(r=>log(r.msg));
+document.getElementById('joy').onclick=()=>post('joycpl');
+function log(s){document.getElementById('log').textContent=s;}
+const es=new EventSource('/events');
+es.onmessage=e=>{
+  const s=JSON.parse(e.data);shown++;
+  const dot=document.getElementById('dot');
+  dot.classList.toggle('on',!!s.connected);
+  document.getElementById('st').textContent=s.connected?'已连接':'等待中';
+  document.getElementById('fps').textContent=s.fps.toFixed(0);
+  document.getElementById('fr').textContent=s.frames;
+  for(let i=0;i<6;i++){
+    const raw=s.ax[i]??1024, t=Math.max(0,Math.min(1,(raw-364)/1320));
+    bars[i].f.style.width=(t*100).toFixed(1)+'%';
+    bars[i].f.classList.toggle('mid',Math.abs(raw-1024)<55);
+    bars[i].v.textContent=raw;
+  }
+  const now=performance.now(); document.getElementById('lat').textContent=(now-last).toFixed(0)+' ms/帧';
+  last=now;
+};
+fetch('/state').then(r=>r.json()).then(s=>{if(s.running){running=true;runBtn.textContent='停 止';runBtn.classList.add('running');}});
+</script>
+
