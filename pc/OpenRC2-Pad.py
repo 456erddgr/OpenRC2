@@ -11,6 +11,26 @@ except Exception:
     HAS_PIL = False
 
 PORT = 9999
+
+
+def _resolve(rel):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
+def _set_icon(root):
+    """窗口图标 = 遥控端同一张图标。"""
+    p = _resolve("icon.png")
+    if os.path.exists(p):
+        try:
+            img = tk.PhotoImage(file=p)
+            root.iconphoto(True, img)
+            root._icon_img = img
+            return True
+        except Exception:
+            return False
+    return False
+
 CENTER, HALF = 1024.0, 660.0
 BG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backgrounds")
 INK, CARD, CARD2 = "#0b0f14", "#151b23", "#1d2530"
@@ -362,7 +382,9 @@ class App(object):
         self.root.destroy()
 
     def _acrylic(self):
-        """Win10 1803+/Win11 的亚克力模糊（ACCENT_ENABLE_ACRYLICBLURBEHIND）。"""
+        """Win10 1803+/Win11 的亚克力模糊。默认关闭：半透明会让背景透进来，看着像"没显示出来"。"""
+        if os.environ.get("OPENRC2_ACRYLIC", "0") != "1":
+            return
         import ctypes
         from ctypes import wintypes
         hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
