@@ -18,6 +18,10 @@ public class NativePanel extends Panel {
     private final Context ctx;
     private Bitmap bmp;
     private int[] argb;
+    // 2 倍超采样（EPX/Scale2x）：480x272 -> 960x544 再做边缘保持放大，比纯最近邻少锯齿、比双线性不发虚
+    private int[] ss2;
+    private Bitmap bmpSS;
+    private int nwSS, nhSS;
     private int nw, nh;
     private boolean inited, first = true;
     private String note = "点一下初始化";
@@ -139,6 +143,8 @@ public class NativePanel extends Panel {
         inited = false;
         bmp = null;
         argb = null;
+        bmpSS = null;
+        ss2 = null;
         note = "正在重启原生核心…";
         ensureInit();
     }
@@ -166,6 +172,9 @@ public class NativePanel extends Panel {
             }
             argb = new int[nw * nh];
             bmp = Bitmap.createBitmap(nw, nh, Bitmap.Config.ARGB_8888);
+            nwSS = nw * 2; nhSS = nh * 2;
+            ss2 = new int[nwSS * nhSS];
+            bmpSS = Bitmap.createBitmap(nwSS, nhSS, Bitmap.Config.ARGB_8888);
             note = "EdgeTX " + EtxNative.version() + "  " + nw + "x" + nh;
             first = true;
             try {
@@ -243,6 +252,7 @@ public class NativePanel extends Panel {
             } else if (newFrame != 0) {
                 long r0 = System.nanoTime();
                 boolean drew = EtxNative.render(argb, nw, nh) != 0;
+                if (drew && ss2 != null) { scale2x(argb, nw, nh, ss2); bmpSS.setPixels(ss2, 0, nwSS, 0, 0, nwSS, nhSS); }
                 if (drew) {
                     bmp.setPixels(argb, 0, nw, 0, 0, nw, nh);
                     dirtyFrame = true;
@@ -308,8 +318,8 @@ public class NativePanel extends Panel {
         // 全屏时铺满整块（cover），非全屏时等比留边（fit）
         float sx = body.width() / nw;
         float sy = body.height() / nh;
-        // 铺满优先：只要目标区域比源图"胖"或"瘦"，就用 cover（裁边不糊边）
-        float s = Math.max(sx, sy);
+        // 全屏才 cover（铺满不留边）；分屏必须 fit（等比缩放留边），否则会溢出盖住页签栏
+        float s = full ? Math.max(sx, sy) : Math.min(sx, sy);
         float w = nw * s, h = nh * s;
         float l = body.centerX() - w / 2, t = body.centerY() - h / 2;
         dst.set(l, t, l + w, t + h);
@@ -317,9 +327,41 @@ public class NativePanel extends Panel {
         paint.setFilterBitmap(false);
         paint.setAntiAlias(false);
         paint.setDither(false);
-        c.drawBitmap(bmp, null, dst, paint);
+        // 硬裁到卡片内，任何缩放都不能画到页签栏/状态栏上
+        int save = c.save();
+        c.clipRect(body);
+        Bitmap src = (bmpSS != null) ? bmpSS : bmp;
+        c.drawBitmap(src, null, dst, paint);
+        c.restoreToCount(save);
         ui.cardStroke(c, dst, Ui.LINE, 1);
         if (!full) ui.textR(c, note, a.right - ui.d(8), a.top + ui.d(14), 10, Ui.DIM, false);
+    }
+
+    /** EPX / Scale2x：每个像素按 4 邻域生成 2x2，斜边更平滑，但不像双线性那样糊。 */
+    private static void scale2x(int[] src, int w, int h, int[] out) {
+        final int W = w * 2;
+        for (int y = 0; y < h; y++) {
+            final int yUp = (y > 0 ? y - 1 : 0) * w;
+            final int yDn = (y < h - 1 ? y + 1 : h - 1) * w;
+            final int yc = y * w;
+            for (int x = 0; x < w; x++) {
+                final int xL = x > 0 ? x - 1 : 0;
+                final int xR = x < w - 1 ? x + 1 : w - 1;
+                final int P = src[yc + x];
+                final int A = src[yUp + x];
+                final int B = src[yc + xR];
+                final int C = src[yc + xL];
+                final int D = src[yDn + x];
+                int e0 = P, e1 = P, e2 = P, e3 = P;
+                if (C == A && C != D && A != B) e0 = A;
+                if (A == B && A != C && B != D) e1 = B;
+                if (D == C && D != B && C != A) e2 = C;
+                if (B == D && B != A && D != C) e3 = D;
+                final int o = (y * 2) * W + x * 2;
+                out[o] = e0; out[o + 1] = e1;
+                out[o + W] = e2; out[o + W + 1] = e3;
+            }
+        }
     }
 
     private boolean hit(float x, float y, float[] out) {
