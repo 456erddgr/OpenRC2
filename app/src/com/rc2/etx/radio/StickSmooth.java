@@ -23,6 +23,8 @@ public final class StickSmooth {
 
     // ---- 估计量 ----
     private final float[] zero = new float[N];   // 每轴零点（校准中点与物理中点的差）
+    private final float[] spanObs = {0f,0f,0f,0f,0f,0f};  // 每轴实测最大行程（0=还没观测到）
+    private final float[] lastOut = new float[N];         // 上一帧输出（用于斜率限制）
     private final float[] vel = new float[N];
     private final float[] acc = new float[N];
     private final float[] step = new float[N];
@@ -31,6 +33,7 @@ public final class StickSmooth {
     private static final float VEL_DEAD = 0.010f;   // 速度死区（手抖不放大）
     private static final float ACC_W = 0.35f;       // 加速度权重（0=纯匀速，太大会甩）
     private static final float HOLD_DECAY_MS = 140f;
+    private static final float SLEW = 0.085f;       // 每帧最大变化量（≈120ms 满行程）
 
     // ---- 档位 ----
     public static volatile int level = 2;
@@ -103,7 +106,12 @@ public final class StickSmooth {
             // 2026-11-02 二次修：上一版只看“本帧位移小”就学零点，结果**杆打满停住时**
             // （d≈0）也会被当成静止 → zero 慢慢追到满杆值 → 满杆读数逐渐变成 0。
             // 现在只在“所有轴都在中点附近、且整体静止”时学，并且幅度硬限 ±0.06。
-            if (hist >= 1 && allNearCenter() && Math.abs(d) < VEL_DEAD) {
+            // 记录该轴实测最大偏离（零点校正后），用来把“硬件打不到 1684”的行程补到 100%
+            float dev = Math.abs(h2[i] - zero[i]);
+            if (spanObs[i] > 0.75f) spanObs[i] *= 0.998f;   // 缓慢回缩，单次抖动不会永久压低量程
+            if (dev > spanObs[i]) spanObs[i] = dev;
+
+            if (hist >= 1 && Math.abs(d) < 0.004f && dev < 0.08f) {
                 float nz = zero[i] + 0.10f * (h2[i] - zero[i]);
                 if (nz > 0.10f) nz = 0.10f;      // 实测静止残差 3~8%，上限放到 10%
                 else if (nz < -0.10f) nz = -0.10f;
@@ -152,9 +160,41 @@ public final class StickSmooth {
             else if (p < h2[i] - cap) p = h2[i] - cap;
             if (p > 1f) p = 1f;
             else if (p < -1f) p = -1f;
-            out[i] = softDead(p - zero[i]);
+            // 预测不许穿过零点另一侧：否则回中时会“往后弹”（用户实测 -18%）
+            if (h2[i] >= 0f && p < 0f) p = 0f;
+            else if (h2[i] <= 0f && p > 0f) p = 0f;
+            // 减零点后再按 (1-|zero|) 归一：否则零点偏移会把满杆压成 80%~90%（用户实测）。
+            float z = zero[i];
+            float span = 1f - (z < 0f ? -z : z);
+            if (span < 0.5f) span = 0.5f;
+            float so = spanObs[i];
+            if (so < 0.75f) so = 0.75f;      // 行程至少按 75% 算，避免小手动作被放大成满杆
+            float n = (p - z) / span / so;
+            if (n > 1f) n = 1f;
+            else if (n < -1f) n = -1f;
+            float tgt = softDead(n);
+            // 斜率限制：每帧最多走 SLEW（约 120ms 打满全程）→ 快速打杆不会“乱跳”，也不会追不上
+            float prev = lastOut[i];
+            // 自适应斜率：慢速微调时强平滑（防抖），快速打杆时放开（保跟随，实测 210ms→更快）
+            float lim = SLEW + 0.9f * Math.abs(step[i]);
+            if (lim > 1.2f) lim = 1.2f;
+            if (tgt > prev + lim) tgt = prev + lim;
+            else if (tgt < prev - lim) tgt = prev - lim;
+            lastOut[i] = tgt;
+            out[i] = tgt;
         }
         return true;
+    }
+
+    /** 一次性把当前值当作零点（开机静止、或用户在校准页点“插帧校准”）。 */
+    public synchronized void snapZero() {
+        if (!has) return;
+        for (int i = 0; i < N; i++) {
+            float z = h2[i];
+            if (z > 0.45f) z = 0.45f;
+            else if (z < -0.45f) z = -0.45f;
+            zero[i] = z;
+        }
     }
 
     /** 六轴是否都还在中点附近（用来判定“整机静止”，避免满杆被误当零点）。 */

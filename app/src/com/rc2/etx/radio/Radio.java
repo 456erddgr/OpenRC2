@@ -57,6 +57,7 @@ public final class Radio {
     /** 是否按 7 轴（RH,RV,LV,LH,P1,P2,P3）喂原生核心。 */
     public volatile boolean nativeAxes7 = true;
     private final StickSmooth smooth = new StickSmooth();
+    private long stillSince = 0L;
     private final float[] sv = new float[6];
     private long lastStickSeq = -1;
     public final Model model;
@@ -343,8 +344,31 @@ public final class Radio {
     public boolean isHidOn() { return hidOn; }
 
     /** 一帧 JSON：6 路原始值（0..2048）+ 8 路输出 us，给 PC 侧虚拟手柄用。 */
-    public String padFrameJson() {
+    /** 插帧后的六轴（DJI/MCU 序 RH,RV,LV,LH,P1,P2，0..2048），电脑端也要吃到插帧值。 */
+    public int[] smoothedRaw6() {
+        int[] o = new int[6];
+        long nowMs = android.os.SystemClock.uptimeMillis();
+        if (!suppressLiveInput && smooth.value(nowMs, sv)) {
+            // sv: 0=lx(RUD) 1=ly(THR) 2=rx(AIL) 3=ry(ELE) 4=k1 5=k2；MCU 序要 RH,RV,LV,LH
+            o[0] = 1024 + Math.round(sv[2] * 1024f);   // RH 副翼
+            o[1] = 1024 + Math.round(sv[3] * 1024f);   // RV 俯仰
+            o[2] = 1024 + Math.round(sv[1] * 1024f);   // LV 油门
+            o[3] = 1024 + Math.round(sv[0] * 1024f);   // LH 偏航
+            o[4] = 1024 + Math.round(sv[4] * 1024f);
+            o[5] = 1024 + Math.round(sv[5] * 1024f);
+            for (int i = 0; i < 6; i++) {
+                if (o[i] < 0) o[i] = 0;
+                else if (o[i] > 2047) o[i] = 2047;
+            }
+            return o;
+        }
         int[] r = duml.raw;
+        for (int i = 0; i < 6; i++) o[i] = i < r.length ? r[i] : 1024;
+        return o;
+    }
+
+    public String padFrameJson() {
+        int[] r = smoothedRaw6();
         StringBuilder b = new StringBuilder(96);
         b.append("{\"t\":").append(System.currentTimeMillis()).append(",\"ax\":[");
         for (int i = 0; i < 6; i++) {
@@ -594,6 +618,17 @@ public final class Radio {
                 smooth.sample(nowMs, du[3], du[2], du[0], du[1], du[4], du[5]);
             }
             if (!suppressLiveInput && smooth.value(nowMs, sv)) {
+                // 静止检测：六轴都几乎不动持续 800ms → 把当前姿态当零点（一次性锁定）
+                boolean still = true;
+                for (int i = 0; i < 6; i++) {
+                    if (sv[i] > 0.06f || sv[i] < -0.06f) { still = false; break; }
+                }
+                if (still) {
+                    if (stillSince == 0L) stillSince = nowMs;
+                    else if (nowMs - stillSince > 800L) { smooth.snapZero(); stillSince = nowMs + 5000L; }
+                } else {
+                    stillSince = 0L;
+                }
                 for (int i = 0; i < 4; i++) input.touch(i, sv[i]);
                 input.touch(8, sv[4]);
                 input.touch(9, sv[5]);

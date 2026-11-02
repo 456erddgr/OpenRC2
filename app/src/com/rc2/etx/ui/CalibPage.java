@@ -35,11 +35,12 @@ public class CalibPage extends Panel {
     private final int[] bind = {-1, -1, -1, -1};
     private final float[] peak = new float[4];
     private final int[] hits = new int[4];
-    private final RectF btnA = new RectF(), btnB = new RectF();
+    private final RectF btnA = new RectF(), btnB = new RectF(), btnC = new RectF();
     private final double[] cenSum = new double[10];
     private int cenN;
     private float[] testRaw;   // 仅测试：合成摇杆数据
     private String hint = "点「开始校准」";
+    private boolean snapArmed = false;
 
     public CalibPage(Radio r) { super(r); }
     @Override public String title() { return "校准"; }
@@ -224,6 +225,10 @@ public class CalibPage extends Panel {
         btnB.set(a.centerX() + w * 0.02f, by, a.centerX() + bw + w * 0.02f, by + bh);
         btn(c, btnA, running ? "重新开始" : (step == 4 ? "再校一次" : "开始校准"), true, h);
         btn(c, btnB, "取消", false, h);
+
+        // 插帧校准：把当前姿态锁成插帧零点（用户要求“校准里带插帧校准”）
+        btnC.set(a.centerX() - bw * 0.95f, by - bh * 1.45f, a.centerX() + bw * 0.95f, by - bh * 0.45f);
+        btn(c, btnC, snapArmed ? "插帧零点已锁 ✓" : "插帧校准（先回中再点）", true, h);
     }
 
     private void disk(Canvas c, float cx, float cy, float rad, int axV, int axH, String label) {
@@ -254,6 +259,11 @@ public class CalibPage extends Panel {
     }
 
     @Override public boolean down(int id, float x, float y) {
+        if (btnC.contains(x, y)) {
+            radio.stickSmooth().snapZero();     // 当前姿态锁成插帧零点
+            snapArmed = true;
+            return true;
+        }
         if (btnA.contains(x, y)) { begin(); return true; }
         if (btnB.contains(x, y)) { cancel(); return true; }
         return false;
