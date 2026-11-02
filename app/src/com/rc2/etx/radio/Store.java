@@ -54,6 +54,21 @@ public final class Store {
         }
     }
 
+    /** 插帧档位 0..3（关/弱/中/强）。 */
+    public static int loadSmooth(Context c) {
+        try {
+            return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("smoothLevel", 2);
+        } catch (Throwable t) {
+            return 2;
+        }
+    }
+
+    public static void saveSmooth(Context c, int lv) {
+        try {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("smoothLevel", lv).apply();
+        } catch (Throwable t) { }
+    }
+
     public static void saveModel(Context c, int m) {
         try {
             c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("radioModel", m).apply();

@@ -10,20 +10,21 @@ import com.rc2.etx.radio.Radio;
 /** 可视化设置页：四张大卡片（机型 / 主题 / 校准 / 导出），点卡片执行。 */
 public class SetPage extends Panel {
     public interface OnCard { void onCard(int idx); }
-    public static final int C_PAD = 0, C_MODEL = 1, C_THEME = 2, C_CAL = 3, C_EXPORT = 4, N = 5;
+    public static final int C_PAD = 0, C_MODEL = 1, C_THEME = 2, C_SMOOTH = 3, C_CAL = 4, C_EXPORT = 5, N = 6;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
-    private final RectF[] card = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
-    private final String[] head = {"电脑虚拟手柄", "遥控器型号", "界面主题", "摇杆校准", "诊断导出"};
+    private final RectF[] card = {new RectF(), new RectF(), new RectF(), new RectF(), new RectF(), new RectF()};
+    private final String[] head = {"电脑虚拟手柄", "遥控器型号", "界面主题", "摇杆插帧", "摇杆校准", "诊断导出"};
     private final String[] desc = {"开＝把摇杆送到电脑，模拟器里当手柄用",
                                    "自动识别 RC2 / RC Pro，可手动指定",
                                    "跟随 SD 卡 THEMES 目录",
+                                   "关/弱/中/强：越强越顺，预测也越多",
                                    "推哪根认哪根，不用选反向",
                                    "导出 sd_probe / hid / native"};
-    private final String[] val = {"关", "自动", "v15", "未校准", "点此导出"};
-    private final int[] accent = {0xFF2DD4BF, 0xFFF5B942, 0xFFF5B942, 0xFFF5B942, 0xFF5AA9FF};
+    private final String[] val = {"关", "自动", "v15", "中", "未校准", "点此导出"};
+    private final int[] accent = {0xFF2DD4BF, 0xFFF5B942, 0xFFF5B942, 0xFF2DD4BF, 0xFFF5B942, 0xFF5AA9FF};
     private OnCard cb;
     private int pressed = -1, active = -1;
 

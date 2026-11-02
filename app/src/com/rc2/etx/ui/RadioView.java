@@ -94,6 +94,14 @@ public final class RadioView extends View {
                         sp.setValue(SetPage.C_THEME, now);
                         if (host != null) host.toast("主题已改为 " + now + "，正在重启内核");
                         if (nativePanelRef != null) nativePanelRef.restartCore();
+                    } else if (idx == SetPage.C_SMOOTH) {
+                        int lv = (com.rc2.etx.radio.StickSmooth.level + 1) & 3;
+                        com.rc2.etx.radio.StickSmooth.setLevel(lv);
+                        com.rc2.etx.radio.Store.saveSmooth(getContext(), lv);
+                        sp.setValue(SetPage.C_SMOOTH, com.rc2.etx.radio.StickSmooth.levelName(lv));
+                        if (host != null) host.toast("摇杆插帧：" + com.rc2.etx.radio.StickSmooth.levelName(lv)
+                                + (lv == 0 ? "（直通原始 10Hz，最跟手但会跳）"
+                                           : "（预测 " + (lv == 1 ? "45" : lv == 2 ? "90" : "130") + "ms）"));
                     } else if (idx == SetPage.C_CAL) {
                         if (panels.length > 4 && panels[4] instanceof CalibPage) {
                             ((CalibPage) panels[4]).begin();
@@ -110,6 +118,9 @@ public final class RadioView extends View {
             sp.setValue(SetPage.C_MODEL, com.rc2.etx.radio.Store.modelName(
                     com.rc2.etx.radio.Store.loadModel(getContext())));
             sp.setValue(SetPage.C_PAD, r.isPadStreamOn() ? "开" : "关");
+            int lv0 = com.rc2.etx.radio.Store.loadSmooth(getContext());
+            com.rc2.etx.radio.StickSmooth.setLevel(lv0);
+            sp.setValue(SetPage.C_SMOOTH, com.rc2.etx.radio.StickSmooth.levelName(lv0));
         }
         if (panels.length > IDX_NATIVE && panels[IDX_NATIVE] instanceof NativePanel) {
             nativePanelRef = (NativePanel) panels[IDX_NATIVE];

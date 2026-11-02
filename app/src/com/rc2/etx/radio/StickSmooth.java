@@ -35,6 +35,23 @@ public final class StickSmooth {
     private static final float OVERSHOOT = 1.15f;
     /** 速度平滑：新速度权重（0.4 = 响应快但抖，0.2 = 稳但钝）。 */
     private static final float VEL_BLEND = 0.45f;
+
+    /** 插帧档位：0=关（直通原始 10Hz） 1=弱 2=中 3=强。由设置页写入并持久化。 */
+    public static volatile int level = 2;
+    /** 每档的 (预测上限 ms, 速度平滑权重, 过冲倍数)。 */
+    private static final float[] LVL_CAP   = { 0f,  45f,  90f, 130f };
+    private static final float[] LVL_BLEND = { 1f, 0.30f, 0.45f, 0.60f };
+    private static final float[] LVL_OVER  = { 1f, 1.05f, 1.15f, 1.25f };
+
+    public static void setLevel(int lv) {
+        if (lv < 0) lv = 0;
+        if (lv > 3) lv = 3;
+        level = lv;
+    }
+
+    public static String levelName(int lv) {
+        switch (lv) { case 0: return "关"; case 1: return "弱"; case 3: return "强"; default: return "中"; }
+    }
     /** 外推窗口：样本到达后只在这个时间内外推，超过就锁住当前值（防过冲）。 */
     private static final float EXTRAP_WINDOW_MS = 40f;
     /** 速度死区：两次样本差小于这个值就当作没动，防止手抖被放大。 */
@@ -70,7 +87,8 @@ public final class StickSmooth {
             if (Math.abs(d) < VEL_DEAD) vNow = 0f;
             // 方向反转：立刻停住预测，并直接把 old vel 归零（这是"抽搐"的唯一来源）
             if (vel[i] != 0f && vNow != 0f && (vNow > 0f) != (vel[i] > 0f)) vNow = 0f;
-            vel[i] = (has && !bridge) ? (vel[i] * (1f - VEL_BLEND) + vNow * VEL_BLEND) : vNow;
+            float bl = LVL_BLEND[level];
+            vel[i] = (has && !bridge) ? (vel[i] * (1f - bl) + vNow * bl) : vNow;
         }
         cur[0] = a0; cur[1] = a1; cur[2] = a2; cur[3] = a3; cur[4] = a4; cur[5] = a5;
         curMs = nowMs;
@@ -89,15 +107,20 @@ public final class StickSmooth {
         float dt = nowMs - curMs;
         if (dt < 0f) dt = 0f;
         // 预测的时间量：只推 PRED_CAP_MS，再往后按指数衰减回真实值
-        float ahead = dt <= PRED_CAP_MS ? dt : PRED_CAP_MS;
+        final float capMs = LVL_CAP[level], over = LVL_OVER[level];
+        if (capMs <= 0f) {           // 档位=关：直接吐最新真实样本（零预测、零平滑）
+            for (int i = 0; i < N; i++) out[i] = cur[i];
+            return true;
+        }
+        float ahead = dt <= capMs ? dt : capMs;
         float decay = 1f;
-        if (dt > PRED_CAP_MS) {
-            decay = (float) Math.exp(-(dt - PRED_CAP_MS) / HOLD_DECAY_MS);
+        if (dt > capMs) {
+            decay = (float) Math.exp(-(dt - capMs) / HOLD_DECAY_MS);
         }
         for (int i = 0; i < N; i++) {
             float p = cur[i] + vel[i] * ahead * decay;
             // 过冲限制：预测点离 cur 不允许超过"最近一步 × OVERSHOOT"（再加 6% 的绝对余量防死区）
-            float cap = step[i] * OVERSHOOT + 0.06f;
+            float cap = step[i] * over + 0.06f;
             float lo = cur[i] - cap, hi = cur[i] + cap;
             if (p < lo) p = lo;
             else if (p > hi) p = hi;
