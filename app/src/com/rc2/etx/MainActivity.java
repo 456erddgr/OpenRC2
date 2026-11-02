@@ -12,6 +12,7 @@ import android.os.BatteryManager;
 import android.os.Bundle;
 import android.text.InputType;
 import android.util.Log;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -73,6 +74,11 @@ public class MainActivity extends Activity implements Host {
         view.setPage(0);           // 0 = 原生页（EdgeTX 实时画面）
         setContentView(view, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // 开机音 + 启动画面（应用级，不动系统 bootanimation）
+        com.rc2.etx.audio.Sfx.setEnabled(com.rc2.etx.radio.Store.loadSfx(this));
+        com.rc2.etx.audio.Sfx.boot();
+        showSplash();
         try {
             registerReceiver(usbRx, new IntentFilter(UsbSerial.ACTION_PERMISSION));
         } catch (Throwable t) {
@@ -226,6 +232,25 @@ public class MainActivity extends Activity implements Host {
                     }
                 })
                 .show();
+    }
+
+    /** 叠一层启动画面，1.6 秒后自动移除；按任意位置也能立刻跳过。 */
+    private void showSplash() {
+        try {
+            final ViewGroup root = (ViewGroup) view.getParent();
+            if (root == null) { view.post(new Runnable() { public void run() { showSplash(); } }); return; }
+            android.graphics.drawable.Drawable ic = null;
+            try { ic = getPackageManager().getApplicationIcon(getPackageName()); } catch (Throwable ignore) { }
+            final com.rc2.etx.ui.Splash sp = new com.rc2.etx.ui.Splash(this, ic, null);
+            sp.setOnFinish(new Runnable() {
+                public void run() { try { root.removeView(sp); } catch (Throwable ignore) { } }
+            });
+            sp.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { try { root.removeView(sp); } catch (Throwable ignore) { } }
+            });
+            root.addView(sp, new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        } catch (Throwable ignore) { }
     }
 
     private void showUsbModeDialog() {

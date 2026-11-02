@@ -238,7 +238,31 @@ I ETX-Radio: binder 补帧 #3
 - 蓝牙 HID 设备模式：本机蓝牙栈只有 `HidHostService`，无 `HidDeviceService`，**不可行**。
 - HID 手柄需一次性 root 授权（建 USB gadget 是内核操作）；授权被拒时右下角会提示「已被拒绝超级用户权限」。
 
-## 虚拟手柄（PC 端 ViGEm，无需 root）
+## 虚拟手柄 · PC 端（EXE，无需 root）
+
+> 思路和 RM510 那套一致：**遥控器不伪装 USB 设备**，只把摇杆数据用普通 TCP 发到电脑，
+> 由电脑上的 ViGEmBus 生成一个标准 Xbox 360 手柄 —— 所以**不需要 root、不碰 `/dev/hidg0`**。
+
+**下载（二选一）**
+
+| 文件 | 用途 |
+| --- | --- |
+| `OpenRC2-安装.exe` | 图形安装包：装到本用户目录 + 建桌面快捷方式，装完自动启动（推荐） |
+| `OpenRC2-Pad.exe` | 绿色单文件，双击即用，不写注册表 |
+
+**界面**：磨砂玻璃卡片风、深色半透明、内置 3 张背景图可一键切换（也能选自己的图）；
+左栏切「Xbox 360 手柄 / 穿越机手感(FVP)」、调死区与 Expo 曲线；右栏是六路摇杆实时条 + 帧率。
+
+**用法**
+
+1. 装 ViGEmBus 驱动（`http://127.0.0.1` 那套不需要，只要一次装驱动）：<https://github.com/nefarius/ViGEmBus/releases>
+2. 遥控器插 USB 或 `adb connect <IP>:5555`，程序启动时会自动执行 `adb reverse tcp:9999 tcp:9999`
+3. 点「启动」→ 遥控器端开数据流：**设置 → 诊断 → 虚拟手柄数据流**（或 `adb shell am start -n com.rc2.etx/.MainActivity --es action pad --ei on 1`）
+4. 打开「打开 joy.cpl 验证」能看到 `Xbox 360 Controller for Windows` 在动
+
+**协议**：遥控器 → PC，TCP `9999`，一行一个 JSON：`{"t":毫秒,"ax":[6路,0..2048],"us":[8路,988..2012]}`，约 **116 fps**（比 dji_link 的 9 Hz 快一个数量级）。
+
+## 虚拟手柄（旧：命令行 Python 版，无需 root）
 
 这条路是照 RM510 那套「遥控器 → adb reverse → PC 造手柄」的做法实现的，和上面的 USB HID 是**两条独立的路**：
 

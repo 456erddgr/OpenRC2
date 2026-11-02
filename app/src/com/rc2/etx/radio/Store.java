@@ -211,4 +211,17 @@ public final class Store {
             return null;
         }
     }
+
+    /** 应用内提示音（按键音/开机音）开关，默认开。 */
+    public static boolean loadSfx(Context c) {
+        try {
+            return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("sfx", true);
+        } catch (Throwable t) { return true; }
+    }
+
+    public static void saveSfx(Context c, boolean on) {
+        try {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("sfx", on).apply();
+        } catch (Throwable ignore) { }
+    }
 }

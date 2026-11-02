@@ -394,6 +394,7 @@ public final class RadioView extends View {
                     for (int i = 0; i < OPEN_COUNT; i++) {
                         if (keyR[i] != null && Ui.in(keyR[i], x, y)) {
                             NativePanel.queueKey(KEY_CODE[i]);
+                            com.rc2.etx.audio.Sfx.click();
                             if (panels[IDX_NATIVE] instanceof NativePanel) {
                                 ((NativePanel) panels[IDX_NATIVE]).fullPending = true;
                             }

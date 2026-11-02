@@ -85,8 +85,7 @@ public class PadStream {
                 try {
                     java.io.FileWriter fw = new java.io.FileWriter(
                             new java.io.File(ctx.getExternalFilesDir(null), "pad_err.txt"), true);
-                    fw.write(lastErr + "
-");
+                    fw.write(lastErr + String.valueOf((char) 10));
                     fw.close();
                 } catch (Throwable ignore) { }
                 running = false;
