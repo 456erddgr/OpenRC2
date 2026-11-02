@@ -569,6 +569,14 @@ public class MainActivity extends Activity implements Host {
             boolean on = i.getIntExtra("on", 1) != 0;
             radio.setPadStreamOn(on);
             toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+        } else if ("vbat".equals(act)) {
+            // 自测预警音：--es action vbat --ei mv 3000（低于 radio.yml 的电池警告阈值即触发）
+            int mv = i.getIntExtra("mv", 3000);
+            int rc = -1;
+            try { rc = com.rc2.etx.jni.EtxNative.setVbat(mv); } catch (Throwable t) {
+                Log.e(TAG, "setVbat 异常: " + t);
+            }
+            Log.i(TAG, "intent action=vbat mv=" + mv + " rc=" + rc);
         } else if ("audio".equals(act)) {
             // 自测：--es action audio [--ei freq 440 --ei len 200]
             int fq = i.getIntExtra("freq", 440), ln = i.getIntExtra("len", 200);

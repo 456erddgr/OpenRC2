@@ -330,3 +330,15 @@ PC 端映射为 **左摇杆 = 偏航(X) + 油门(Y)**、**右摇杆 = 副翼(X) 
 | EdgeTX 告警音（低电量/开关/摇杆位置…） | **目前静音** | `libetx.so` 里 `audio` 模块没有后端驱动：EdgeTX 的 `audioTask` 调 `audioDriver.start()`，我们移植时没有实现这个 driver，也没有把音量/波形回调到 Java |
 
 要让 EdgeTX 自己的告警音响起来，需要在 so 侧补一个 `AudioDriver` 桩：把 `audioQueue` 里的 `(freq, len, pause)` 通过 JNI 回调给 Java，由 Java 用 `ToneGenerator`/`AudioTrack` 发声。这属于 so 改动，需要重新编 `libetx.so` 再发版；不是改 Java 就能解决的。
+
+## 1.37.x 关键修复（摇杆与声音）
+
+| 版本 | 内容 |
+|---|---|
+| 1.37.0 | 删除非法上行心跳（`01 01 08 0a`），退避改 ≥6s；连接不再被自己毒死 |
+| 1.37.1 | **DUML 双形态切帧**：支持裸 DUML（无 `55 CC 30 75` 头），修复“帧错位导致摇杆帧几乎全丢” |
+| 1.37.2 | 摇杆帧判定收紧 `len==30 && cmdSet==6 && cmdId==0xAE`；每秒 `stat` 日志（hz/stickHz/bad/gap150） |
+| 1.37.3 | 新增 `--es action vbat --ei mv <mV>` 自测钩子；原生音频 `RegisterNatives(audioTone)=0` 确认注册成功 |
+
+真机实测（1.37.2）：`stickHz=9~10 / bad=0 / gap150=0`，22 秒内 196 帧（修复前 1 帧）。
+摇杆数据源为 `127.0.0.1:40007` 的 dji_link，`8.8–9.6 Hz` 是硬上限（详见 `re/04-速率上限与槽位结论.md`）。
