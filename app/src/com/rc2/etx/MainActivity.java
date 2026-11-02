@@ -569,6 +569,12 @@ public class MainActivity extends Activity implements Host {
             boolean on = i.getIntExtra("on", 1) != 0;
             radio.setPadStreamOn(on);
             toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+        } else if ("model".equals(act)) {
+            // 遥控器型号：--es action model --ei v 0(自动)/1(RC2)/2(RC Pro)
+            int mv = i.getIntExtra("v", 0);
+            com.rc2.etx.radio.Store.saveModel(this, mv);
+            Log.i(TAG, "intent action=model v=" + mv);
+            toast("型号已切换为 " + (mv == 0 ? "自动识别" : mv == 1 ? "RC2" : "RC Pro"));
         } else if ("page".equals(act)) {
             view.setPage(i.getIntExtra("p", 0));
         } else if ("sink".equals(act)) {

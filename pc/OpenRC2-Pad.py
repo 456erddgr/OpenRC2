@@ -278,6 +278,18 @@ class App(object):
             tk.Label(left, text="   " + desc, bg=CARD, fg=SUB,
                      font=("Microsoft YaHei UI", 9)).pack(anchor="w")
 
+        tk.Label(left, text="遥控器型号", bg=CARD, fg=TXT,
+                 font=("Microsoft YaHei UI", 12, "bold")).pack(anchor="w", pady=(14, 0))
+        self.model = tk.StringVar(value="0")
+        for val, label in (("0", "自动识别"), ("1", "RC2"), ("2", "RC Pro")):
+            tk.Radiobutton(left, text=label, variable=self.model, value=val,
+                           command=self.on_model, bg=CARD, fg=TXT, selectcolor=CARD2,
+                           activebackground=CARD, activeforeground=AMBER,
+                           font=("Microsoft YaHei UI", 11)).pack(anchor="w")
+        self.model_note = tk.Label(left, text="  同步到遥控器（决定摇杆数据源）", bg=CARD,
+                                   fg=SUB, font=("Microsoft YaHei UI", 9))
+        self.model_note.pack(anchor="w")
+
         tk.Label(left, text="死区 6%", bg=CARD, fg=SUB,
                  font=("Microsoft YaHei UI", 10)).pack(anchor="w", pady=(12, 0))
         self.dz = tk.Scale(left, from_=0, to=20, orient="horizontal", bg=CARD, fg=TXT,
@@ -338,7 +350,7 @@ class App(object):
         r.overrideredirect(True)           # 去掉系统标题栏
         r.attributes("-topmost", False)
         try:
-            r.attributes("-alpha", 0.97)
+            r.attributes("-alpha", 1.0)
         except Exception:
             pass
         r.update_idletasks()
@@ -429,6 +441,17 @@ class App(object):
             self.pad.push([1024] * 6)
             self._pending = "[自检] 完成：joy.cpl 里两个摇杆应各画了一个圆"
         threading.Thread(target=run, daemon=True).start()
+
+    def on_model(self):
+        v = self.model.get()
+        self.say("遥控器型号 -> %s" % {"0": "自动识别", "1": "RC2", "2": "RC Pro"}[v])
+        def work():
+            try:
+                self._adb("shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                          "--es", "action", "model", "--ei", "v", v)
+            except Exception as e:
+                self.say("同步型号失败：%s" % e)
+        threading.Thread(target=work, daemon=True).start()
 
     def on_mode(self):
         if self.pad:
