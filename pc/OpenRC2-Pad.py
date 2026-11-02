@@ -346,8 +346,52 @@ class App(object):
         self._chrome()
         _set_icon(self.root)
         self.root.deiconify(); self.root.lift(); self.root.focus_force()
+        # 新界面：液态玻璃（苹果风格）。旧界面用 OPENRC2_UI=old 回退
+        self.glass = None
+        if os.environ.get("OPENRC2_UI", "glass") != "old":
+            try:
+                import ui_glass
+                self.glass = self._build_glass(ui_glass)
+            except Exception as e:
+                print("[ui] glass 失败，回退旧界面：%s" % e)
 
     # ---------- 外观：无边框 + 圆角 + 磨砂（Win10/11 acrylic） ----------
+    # ---------- 新界面（液态玻璃） ----------
+    def _build_glass(self, mod):
+        # 把旧界面全部藏起来，只留新画布
+        keep = None
+        for ch in self.root.winfo_children():
+            try:
+                if ch.winfo_class() == "Canvas" and keep is None and len(self.root.winfo_children()) > 0:
+                    continue
+                ch.pack_forget(); ch.grid_forget(); ch.place_forget()
+            except Exception:
+                pass
+        cb = {
+            "start": lambda: (self.start() if not self.running else self.stop()),
+            "stop": self.stop,
+            "selftest": self.selftest,
+            "model": self._glass_model,
+            "mode": self._glass_mode,
+            "bg": lambda: self.pick_bg(),
+            "joycpl": lambda: subprocess.Popen("joy.cpl"),
+        }
+        self._ui_mod = mod
+        return mod.GlassUI(self.root, cb)
+
+    def _glass_model(self, v):
+        self.glass.set_model(v)
+        ok, out = self._adb("shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                            "--es", "action", "model", "--ei", "v", str(v))
+        self.glass.set_status(text=("[adb] 型号已同步" if ok else "同步失败：%s" % out.strip()[:60]))
+
+    def _glass_mode(self, m):
+        if self.pad:
+            self.pad.mode = m
+        self.glass.set_mode(m)
+        self.glass.set_status(text=("FVP 手感：设备仍是 Xbox360，只是只推摇杆 + Expo 曲线"
+                                    if m == "fvp" else "Xbox360 手柄：摇杆 + 扳机 + 按键"))
+
     # ---------- adb ----------
     def _adb(self, *args, **kw):
         """跑一条 adb 命令，返回 (ok, 输出)。"""
@@ -520,6 +564,7 @@ class App(object):
         self.link = Link(self.on_frame, self.on_state)
         self.link.start()
         self.running = True
+        if getattr(self, "glass", None): self.glass.set_running(True)
         self.btn.configure(text="停 止")
         self.dot.configure(text="●  运行中", fg=TEAL)
         self.say("遥控器端开启「虚拟手柄数据流」：设置→诊断，或 adb shell am start -n com.rc2.etx/.MainActivity --es action pad --ei on 1")
@@ -538,11 +583,17 @@ class App(object):
 
     def on_frame(self, ax):
         # 数据线程只做一件事：立刻推给 ViGEm（延迟优先）；界面由 _tick 以 16fps 读 latest
-        if self.pad:
+        now = time.time()
+        if self.pad and (now - getattr(self, "_last_push", 0.0)) >= 0.008:   # 限到 ~125Hz，别把 ViGEm 喂爆
+            self._last_push = now
             self.pad.push(ax)
+        if getattr(self, "glass", None):
+            self.glass.set_frame(ax)
 
     def on_state(self, msg):
         self._pending = msg
+        if getattr(self, "glass", None):
+            self.glass.set_status(text=msg)
 
     def draw_bar(self, cv, v):
         cv.delete("all")
@@ -553,6 +604,13 @@ class App(object):
         cv.create_rectangle(0, 0, max(2, w * t), 12, fill=col, outline="")
 
     def _tick(self):
+        g = getattr(self, "glass", None)
+        if g and self.link:
+            dt = time.time() - self.fps_t0
+            if dt >= 0.5:
+                self.fps = (self.link.frames - self.fps_n0) / max(dt, 1e-6)
+                self.fps_t0, self.fps_n0 = time.time(), self.link.frames
+            g.set_status(connected=self.link.connected, fps=self.fps, frames=self.link.frames)
         if self.link:
             for i, cv in enumerate(self.bars):
                 v = self.link.latest[i] if i < len(self.link.latest) else 1024

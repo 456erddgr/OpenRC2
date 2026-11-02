@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('icon.png', '.'), ('backgrounds', 'backgrounds'), ('driver', 'driver'), ('platform-tools', 'platform-tools'), ('OpenRC2-启动.bat', '.')]
+datas = [('ui_glass.py', '.'), ('icon.png', '.'), ('backgrounds', 'backgrounds'), ('driver', 'driver'), ('platform-tools', 'platform-tools'), ('OpenRC2-启动.bat', '.')]
 binaries = []
-hiddenimports = []
+hiddenimports = ['ui_glass']
 tmp_ret = collect_all('vgamepad')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
