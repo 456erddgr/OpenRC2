@@ -18,12 +18,14 @@ public class UsbDialog extends Dialog {
     public interface Pick { void onPick(int which); }
 
     private static final String[] TITLE = {
-            "游戏手柄（插电脑飞模拟器）",
+            "虚拟手柄（电脑端用，无需 root）",
+            "游戏手柄（USB HID，需 root）",
             "文件存储 / USB 调试",
             "串口（暂不支持）"
     };
     private static final String[] DESC = {
-            "插电脑当手柄，模拟器直接认摇杆",
+            "摇杆直连电脑，模拟器直接认成手柄",
+            "把遥控器变成 USB 手柄（要一次 root）",
             "手机助手 / 传文件 / adb（默认）",
             "还没做"
     };
@@ -36,7 +38,7 @@ public class UsbDialog extends Dialog {
 
     private final float d;
     private final Pick pick;
-    private final RectF[] rows = new RectF[3];
+    private final RectF[] rows = new RectF[4];
     private final RectF cancelR = new RectF();
     private int pressed = -1;
 
@@ -72,7 +74,7 @@ public class UsbDialog extends Dialog {
             float top = dp(20);
             float y = top + dp(74);
             float rowH = dp(56);
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 4; i++) {
                 rows[i] = new RectF(left + pad, y, left + cardW - pad, y + rowH);
                 y += rowH + dp(5);
             }
@@ -98,14 +100,14 @@ public class UsbDialog extends Dialog {
             p.setColor(C_ACC); p.setAlpha(40);
             c.drawRoundRect(new RectF(card.left + dp(16), card.top + dp(57), card.right - dp(16), card.top + dp(58.5f)), 0, 0, p);
 
-            // 三行
-            for (int i = 0; i < 3; i++) {
+            // 四行：0=虚拟手柄 1=USB HID 2=存储/adb 3=串口
+            for (int i = 0; i < 4; i++) {
                 RectF r = rows[i];
                 boolean hot = (pressed == i);
                 p.setColor(hot ? 0xFF23303D : 0xFF1A212B);
                 c.drawRoundRect(r, dp(12), dp(12), p);
                 // 左侧色条
-                p.setColor(i == 0 ? C_ACC : (i == 2 ? C_WARN : 0xFF5AA9FF));
+                p.setColor(i == 0 ? 0xFF2DD4BF : (i == 1 ? C_ACC : (i == 3 ? C_WARN : 0xFF5AA9FF)));
                 c.drawRoundRect(new RectF(r.left + dp(8), r.top + dp(10), r.left + dp(11), r.bottom - dp(10)), dp(2), dp(2), p);
                 tp.setColor(C_TXT); tp.setTextSize(dp(12.5f)); tp.setFakeBoldText(true);
                 c.drawText(TITLE[i], r.left + dp(18), r.top + dp(23), tp);
@@ -122,7 +124,7 @@ public class UsbDialog extends Dialog {
             float x = e.getX(), y = e.getY();
             if (e.getAction() == MotionEvent.ACTION_DOWN) {
                 pressed = -1;
-                for (int i = 0; i < 3; i++) if (rows[i] != null && rows[i].contains(x, y)) pressed = i;
+                for (int i = 0; i < 4; i++) if (rows[i] != null && rows[i].contains(x, y)) pressed = i;
                 invalidate();
                 return true;
             }

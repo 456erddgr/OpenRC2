@@ -265,6 +265,11 @@ public class MainActivity extends Activity implements Host {
             public void onPick(int which) {
                 usbDialogShown = false;
                 if (which == 0) {
+                    // 虚拟手柄：不碰 root、不建 gadget。设备端只负责把摇杆数据发到 127.0.0.1:9999，
+                    // 电脑端（OpenRC2-Pad）执行 adb reverse 后就能收；模拟器里表现为一个 Xbox 手柄。
+                    radio.setPadStreamOn(true);
+                    toast("虚拟手柄已开：电脑端打开 OpenRC2-Pad 点「开启连接」即可（无需 root）");
+                } else if (which == 1) {
                     // 绝不在 App 里直接 su：这个 ROM 上 su 会弹授权框，
                     // 且构建 gadget 期间若有脚本去抢 UDC 会导致内核重启。
                     // 只做两件事：①已有 /dev/hidg0 就直接用；②否则给出电脑端一键脚本的指引。
@@ -274,11 +279,12 @@ public class MainActivity extends Activity implements Host {
                     } else {
                         showHidHelpDialog();
                     }
-                } else if (which == 1) {
+                } else if (which == 2) {
                     radio.setHidOn(false);
+                    radio.setPadStreamOn(false);
                     com.rc2.etx.usb.UsbGadget.restore(MainActivity.this);
                     toast("已还原为文件存储 / USB 调试");
-                } else if (which == 2) {
+                } else if (which == 3) {
                     toast("串口模式暂未实现");
                 }
             }

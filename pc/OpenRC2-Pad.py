@@ -2,7 +2,7 @@
 """OpenRC2 虚拟手柄（PC 端 GUI）  作者：软糖布丁
 同 RM510 思路：遥控器把摇杆数据经 adb reverse 发到 PC，PC 用 ViGEmBus 造手柄。
 """
-import json, os, socket, subprocess, threading, time, tkinter as tk
+import json, os, sys, socket, subprocess, shutil, threading, time, tkinter as tk
 from tkinter import filedialog
 try:
     from PIL import Image, ImageTk, ImageFilter, ImageEnhance
@@ -16,6 +16,35 @@ BG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backgrounds")
 INK, CARD, CARD2 = "#0b0f14", "#151b23", "#1d2530"
 TXT, SUB = "#e6edf3", "#8b949e"
 AMBER, TEAL = "#f5b942", "#2dd4bf"
+
+
+def _adb():
+    for name in ("adb", "adb.exe"):
+        q = shutil.which(name)
+        if q:
+            return q
+    cands = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-toolsdb.exe"),
+        r"C:\platform-toolsdb.exe",
+        r"C:dbdb.exe",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "platform-tools", "adb.exe"),
+    ]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def _adb_run(args, timeout=12):
+    exe = _adb()
+    if not exe:
+        return False, "找不到 adb.exe（把 platform-tools 放本程序同目录）"
+    try:
+        r = subprocess.run([exe] + args, capture_output=True, text=True, timeout=timeout,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode == 0, ((r.stdout or "") + (r.stderr or "")).strip()
+    except Exception as e:
+        return False, str(e)
 
 
 class Link(threading.Thread):
@@ -75,6 +104,39 @@ class Link(threading.Thread):
         try:
             if self.srv: self.srv.close()
         except Exception: pass
+
+
+def _resource(rel):
+    """打包后从 sys._MEIPASS 取资源，源码运行时从脚本目录取。"""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
+def ensure_driver():
+    """确保 ViGEmBus 可用：能建虚拟手柄就直接用，否则装内置驱动再试。"""
+    try:
+        import vgamepad  # noqa: F401
+    except Exception as e:
+        return False, "缺少 vgamepad 模块：%s" % e
+    try:
+        vgamepad.VX360Gamepad()
+        return True, "ViGEmBus 已就绪"
+    except Exception as first:
+        exe = _resource(os.path.join("driver", "ViGEmBus_setup.exe"))
+        if not os.path.isfile(exe):
+            return False, "ViGEmBus 未安装，且找不到内置驱动：%s" % first
+        try:
+            subprocess.run([exe, "/qn", "/norestart"], timeout=180,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            return False, "安装内置驱动失败：%s" % e
+        try:
+            import importlib
+            importlib.reload(vgamepad)
+            vgamepad.VX360Gamepad()
+            return True, "已用内置驱动装好 ViGEmBus"
+        except Exception as e2:
+            return False, "装完仍不可用：%s" % e2
 
 
 class Pad(object):
@@ -246,6 +308,84 @@ class App(object):
         self.stat = tk.Label(foot, text="就绪", bg=INK, fg=SUB,
                              font=("Microsoft YaHei UI", 10))
         self.stat.pack(side="left", padx=16)
+        self._chrome()
+
+    # ---------- 外观：无边框 + 圆角 + 磨砂（Win10/11 acrylic） ----------
+    def _chrome(self):
+        r = self.root
+        r.overrideredirect(True)           # 去掉系统标题栏
+        r.attributes("-topmost", False)
+        try:
+            r.attributes("-alpha", 0.97)
+        except Exception:
+            pass
+        r.update_idletasks()
+        try:
+            self._acrylic()
+            self._round_corners()
+        except Exception:
+            pass
+        # 自绘标题条：拖动 + 最小化 + 关闭
+        bar = tk.Frame(r, bg=INK, height=34)
+        bar.pack(fill="x", side="top")
+        bar.pack_propagate(False)
+        tk.Label(bar, text="  OpenRC2", bg=INK, fg=AMBER,
+                 font=("Microsoft YaHei UI", 10, "bold")).pack(side="left")
+        tk.Button(bar, text="✕", command=self._quit, bg=INK, fg=SUB, bd=0,
+                  activebackground="#2a3340", font=("Microsoft YaHei UI", 11),
+                  padx=10).pack(side="right")
+        tk.Button(bar, text="—", command=self._min, bg=INK, fg=SUB, bd=0,
+                  activebackground="#2a3340", font=("Microsoft YaHei UI", 11),
+                  padx=10).pack(side="right")
+        for wdg in (bar,):
+            wdg.bind("<Button-1>", self._drag0)
+            wdg.bind("<B1-Motion>", self._drag1)
+
+    def _drag0(self, e):
+        self._d = (e.x_root - self.root.winfo_rootx(), e.y_root - self.root.winfo_rooty())
+
+    def _drag1(self, e):
+        if getattr(self, "_d", None):
+            self.root.geometry("+%d+%d" % (e.x_root - self._d[0], e.y_root - self._d[1]))
+
+    def _min(self):
+        self.root.overrideredirect(False)
+        self.root.iconify()
+
+    def _quit(self):
+        try:
+            self.stop()
+        except Exception:
+            pass
+        self.root.destroy()
+
+    def _acrylic(self):
+        """Win10 1803+/Win11 的亚克力模糊（ACCENT_ENABLE_ACRYLICBLURBEHIND）。"""
+        import ctypes
+        from ctypes import wintypes
+        hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+
+        class ACCENT(ctypes.Structure):
+            _fields_ = [("AccentState", ctypes.c_int), ("AccentFlags", ctypes.c_int),
+                        ("GradientColor", ctypes.c_uint), ("AnimationId", ctypes.c_int)]
+
+        class WCADATA(ctypes.Structure):
+            _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.c_void_p),
+                        ("SizeOfData", ctypes.c_size_t)]
+
+        accent = ACCENT(4, 2, 0xCC1A1F26, 0)   # 4 = ACRYLICBLURBEHIND，颜色 ABGR
+        data = WCADATA(19, ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p),
+                       ctypes.sizeof(accent))
+        ctypes.windll.user32.SetWindowCompositionAttribute(hwnd, ctypes.byref(data))
+
+    def _round_corners(self):
+        import ctypes
+        hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+        try:
+            val = ctypes.c_int(2)              # DWMWCP_ROUND
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(val), ctypes.sizeof(val))
+        except Exception:
+            pass
 
     def selftest(self):
         """不接遥控器也能验证：合成一段摇杆扫描，直接喂虚拟手柄。
@@ -291,17 +431,13 @@ class App(object):
         self.start() if not self.running else self.stop()
 
     def start(self):
-        ok, out = True, ""
-        try:
-            r = subprocess.run(["adb", "reverse", "tcp:%d" % PORT, "tcp:%d" % PORT],
-                               capture_output=True, text=True, timeout=10)
-            ok = r.returncode == 0
-            out = (r.stdout or "") + (r.stderr or "")
-        except Exception as e:
-            ok, out = False, str(e)
+        ok, out = _adb_run(["reverse", "tcp:%d" % PORT, "tcp:%d" % PORT])
         self.say("[adb] reverse " + ("成功" if ok else "失败：" + out.strip()[:70]))
         if not ok:
-            self.say("      先 adb connect <遥控器IP>:5555，或插 USB 开调试")
+            self.say("      先 USB 插上开调试，或 adb connect <遥控器IP>:5555")
+        ok2, out2 = _adb_run(["shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                              "--es", "action", "pad", "--ei", "on", "1"], timeout=15)
+        self.say("[adb] 遥控器端开流 " + ("成功" if ok2 else "失败：" + out2.strip()[:70]))
         if self.pad and not self.pad.ok:
             self.say("[vigem] 虚拟手柄不可用：%s" % self.pad.err)
             self.say("        正在尝试用内置驱动修复…")
@@ -322,6 +458,10 @@ class App(object):
     def stop(self):
         if self.link:
             self.link.stop(); self.link = None
+        _adb_run(["shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                  "--es", "action", "pad", "--ei", "on", "0"], timeout=15)
+        okr, outr = _adb_run(["reverse", "--remove", "tcp:%d" % PORT])
+        self.say("[adb] 关闭 " + ("已撤销 reverse" if okr else outr.strip()[:60]))
         self.running = False
         self.btn.configure(text="启 动")
         self.dot.configure(text="●  未启动", fg=SUB)

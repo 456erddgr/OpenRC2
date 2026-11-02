@@ -5,7 +5,7 @@ a = Analysis(
     ['OpenRC2-Pad.py'],
     pathex=[],
     binaries=[],
-    datas=[('backgrounds', 'backgrounds'), ('driver', 'driver'), ('OpenRC2-启动.bat', '.')],
+    datas=[('backgrounds', 'backgrounds'), ('driver', 'driver'), ('platform-tools', 'platform-tools'), ('OpenRC2-启动.bat', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
