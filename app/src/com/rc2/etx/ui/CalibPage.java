@@ -41,6 +41,11 @@ public class CalibPage extends Panel {
     private float[] testRaw;   // 仅测试：合成摇杆数据
     private String hint = "点「开始校准」";
     private boolean snapArmed = false;
+    // 冲程校准：0 空闲；1 采集中；2 已完成
+    private int tcal;
+    private long tcalT0;
+    private final float[] tmin = new float[6];
+    private final float[] tmax = new float[6];
 
     public CalibPage(Radio r) { super(r); }
     @Override public String title() { return "校准"; }
@@ -219,6 +224,8 @@ public class CalibPage extends Panel {
                     a.centerX(), a.top + h * 0.60f, h * 0.032f, 0xFF8A97A6, false);
         }
 
+        pumpTcal();
+
         // 按钮
         float bw = w * 0.28f, bh = h * 0.10f, by = a.top + h * 0.80f;
         btnA.set(a.centerX() - bw - w * 0.02f, by, a.centerX() - w * 0.02f, by + bh);
@@ -228,7 +235,7 @@ public class CalibPage extends Panel {
 
         // 插帧校准：把当前姿态锁成插帧零点（用户要求“校准里带插帧校准”）
         btnC.set(a.centerX() - bw * 0.95f, by - bh * 1.45f, a.centerX() + bw * 0.95f, by - bh * 0.45f);
-        btn(c, btnC, snapArmed ? "插帧归零已锁 ✓（点此重锁）" : "插帧归零（先回中再点）", true, h);
+        btn(c, btnC, tcal == 1 ? "采集中…把每根杆都推到顶" : (tcal == 2 ? "冲程校准完成 ✓（点此重做）" : "冲程校准（推满即当 100%）"), true, h);
     }
 
     private void disk(Canvas c, float cx, float cy, float rad, int axV, int axH, String label) {
@@ -246,6 +253,36 @@ public class CalibPage extends Panel {
         p.setTextAlign(Paint.Align.LEFT);
     }
 
+    /** 冲程校准：8 秒内记录每轴 min/max，结束时把实测满杆写成一轴的 100%。 */
+    private void pumpTcal() {
+        if (tcal != 1) return;
+        com.rc2.etx.radio.StickSmooth sm = radio.stickSmooth();
+        for (int i = 0; i < 6; i++) {
+            float v = sm.lastRaw(i);
+            if (v < tmin[i]) tmin[i] = v;
+            if (v > tmax[i]) tmax[i] = v;
+        }
+        long el = System.currentTimeMillis() - tcalT0;
+        if (el < 8000) return;
+        int ok = 0;
+        for (int i = 0; i < 6; i++) {
+            float lo = tmin[i] > 8f ? 0f : tmin[i];
+            float hi = tmax[i] < -8f ? 0f : tmax[i];
+            // 必须真的推过半程才认，否则静止时的微小抖动会被当成满行程，增益炸掉
+            if (hi - lo < 0.6f) continue;
+            ok++;
+            float mid = (lo + hi) * 0.5f;
+            float neg = mid - lo;
+            float pos = hi - mid;
+            if (neg > 1.6f) neg = 1.6f;
+            if (pos > 1.6f) pos = 1.6f;
+            sm.setAxisCal(i, mid, neg, pos);
+        }
+        tcal = 2;
+        hint = ok == 0 ? "没检测到推杆：请把每根杆推到四角再来一次"
+                : ("冲程校准已写入（" + ok + " 轴，实测满杆=100%）");
+    }
+
     private void btn(Canvas c, RectF r, String s, boolean primary, float h) {
         p.setStyle(Paint.Style.FILL);
         p.setColor(primary ? 0xFFF5B942 : 0xFF1B2430);
@@ -260,9 +297,11 @@ public class CalibPage extends Panel {
 
     @Override public boolean down(int id, float x, float y) {
         if (btnC.contains(x, y)) {
-            radio.stickSmooth().snapZero();      // 一键：当前姿态锁成插帧零点
-            snapArmed = true;
-            hint = "插帧零点已锁定（六轴）";
+            if (tcal == 1) return true;          // 采集期间不重入
+            tcal = 1;
+            tcalT0 = System.currentTimeMillis();
+            for (int i = 0; i < 6; i++) { tmin[i] = 9f; tmax[i] = -9f; }
+            hint = "把每根杆都推到四角，8 秒后自动完成";
             return true;
         }
         if (btnA.contains(x, y)) { begin(); return true; }

@@ -135,10 +135,10 @@ public final class StickSmooth {
             if (spanObs[i] > 0.75f) spanObs[i] *= 0.998f;   // 缓慢回缩，单次抖动不会永久压低量程
             if (dev > spanObs[i]) spanObs[i] = dev;
 
-            if (hist >= 1 && Math.abs(d) < 0.004f && dev < 0.08f) {
+            if (hist >= 1 && Math.abs(d) < 0.004f && dev < 0.15f) {
                 float nz = zero[i] + 0.10f * (h2[i] - zero[i]);
-                if (nz > 0.10f) nz = 0.10f;      // 实测静止残差 3~8%，上限放到 10%
-                else if (nz < -0.10f) nz = -0.10f;
+                if (nz > 0.15f) nz = 0.15f;      // 实测有的轴残差 11%，上限放到 15%
+                else if (nz < -0.15f) nz = -0.15f;
                 zero[i] = nz;
             }
             // 任一轴离开中心区就立即冻结学习（zero 保持不动）
@@ -222,6 +222,12 @@ public final class StickSmooth {
     public synchronized boolean axisCalOk(int i) { return i >= 0 && i < N && calOk[i]; }
 
     /** 一次性把当前值当作零点（开机静止、或用户在校准页点“插帧校准”）。 */
+
+    /** 最近一帧的原生归一值（未经插值/零点），给"冲程校准"取样用。 */
+    public synchronized float lastRaw(int i) {
+        if (i < 0 || i >= N) return 0f;
+        return yLast[i];
+    }
     public synchronized void snapZero() {
         if (!has) return;
         for (int i = 0; i < N; i++) {
