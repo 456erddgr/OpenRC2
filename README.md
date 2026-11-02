@@ -320,3 +320,13 @@ PC 端映射为 **左摇杆 = 偏航(X) + 油门(Y)**、**右摇杆 = 副翼(X) 
 | 系统设置改了又回去 | EdgeTX 只在“离开页面/按 RTN”时写 `radio.yml` | 新增 `onPause` 落盘：切走、回桌面、退出前都会刷写 |
 | PC 端打不开 | Windows 拦未签名 exe | 用附带 `OpenRC2-启动.bat`（先 Unblock 再启动）；日志在 `%LOCALAPPDATA%\OpenRC2\log.txt` |
 
+## 声音（开机音 / 告警音）现状——实测结论
+
+| 项目 | 现状 | 证据 |
+|---|---|---|
+| 系统开机动画 | **原厂，未改动** | `/product/media/bootanimation.zip` = 3,619,610 B，md5 `b559b3accd82bea293ca6407dd40e7d0`，与出厂备份逐字节一致 |
+| 系统开机声音 | **这台机器本来就没有** | `/product/media/audio/ui/` 里只有 `ChargingStarted/Dock/Effect_Tick/InCallNotification/Keypress*` 等 OGG，**没有任何 boot/poweron 音频**；`getprop ro.config.poweron_sound`、`persist.sys.boot.sound` 均为空 |
+| App 按键音 | 有（`app/src/com/rc2/etx/audio/Sfx.java`，ToneGenerator 走 `STREAM_MUSIC`，32 ms 短音，40 ms 节流） | 真机按键可闻 |
+| EdgeTX 告警音（低电量/开关/摇杆位置…） | **目前静音** | `libetx.so` 里 `audio` 模块没有后端驱动：EdgeTX 的 `audioTask` 调 `audioDriver.start()`，我们移植时没有实现这个 driver，也没有把音量/波形回调到 Java |
+
+要让 EdgeTX 自己的告警音响起来，需要在 so 侧补一个 `AudioDriver` 桩：把 `audioQueue` 里的 `(freq, len, pause)` 通过 JNI 回调给 Java，由 Java 用 `ToneGenerator`/`AudioTrack` 发声。这属于 so 改动，需要重新编 `libetx.so` 再发版；不是改 Java 就能解决的。
