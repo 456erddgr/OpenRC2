@@ -390,8 +390,13 @@ public final class Radio {
      * RC Pro 通道序 0..3 与 RC2 的 MCU 序一致：RH, RV, LV, LH；4/5 = 左右波轮。
      */
     private void startRcProIfAny() {
+
         if (rcpro != null) return;
         int model = com.rc2.etx.radio.Store.loadModel(ctx);
+        if (model == 2 && !padStream.isRunning()) {
+            Log.i(TAG, "型号=RC Pro → 自动开启虚拟手柄数据流");
+            padStream.start(ctx);
+        }
         if (model == 1) {                    // 用户明确选了 RC2：不走 binder
             android.util.Log.i(TAG, "型号设置=RC2，跳过 protocol binder");
             return;

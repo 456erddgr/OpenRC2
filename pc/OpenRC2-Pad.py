@@ -100,11 +100,14 @@ class Pad(object):
         return x
 
     def push(self, ax):
+        """ax 顺序 = 遥控器 DUML 原始 6 轴：[0]副翼AIL [1]俯仰ELE [2]油门THR [3]偏航RUD [4]左波轮 [5]右波轮。
+        左摇杆 = 偏航(ax3, X) + 油门(ax2, Y)；右摇杆 = 副翼(ax0, X) + 俯仰(ax1, Y)。
+        之前把 ax[0] 当左杆 X、ax[3] 当右杆 X，所以推油门动的是右杆竖直、模拟器里等于没反应。"""
         if not self.ok:
             return
         try:
-            self.pad.left_joystick_float(x_value_float=self._n(ax[0]), y_value_float=-self._n(ax[1]))
-            self.pad.right_joystick_float(x_value_float=self._n(ax[3]), y_value_float=-self._n(ax[2]))
+            self.pad.left_joystick_float(x_value_float=self._n(ax[3]), y_value_float=-self._n(ax[2]))
+            self.pad.right_joystick_float(x_value_float=self._n(ax[0]), y_value_float=-self._n(ax[1]))
             if self.mode == "xbox":
                 self.pad.left_trigger(value=0); self.pad.right_trigger(value=0)
             self.pad.update()
@@ -203,7 +206,8 @@ class App(object):
                            showvalue=False, command=self.on_ex)
         self.ex.set(100); self.ex.pack(anchor="w")
 
-        for text, cmd in (("换背景图", self.pick_bg), ("下一张背景", self.next_bg),
+        for text, cmd in (("自检：扫一遍摇杆", self.selftest),
+                          ("换背景图", self.pick_bg), ("下一张背景", self.next_bg),
                           ("打开 joy.cpl 验证", lambda: subprocess.Popen("joy.cpl"))):
             tk.Button(left, text=text, command=cmd, bg=CARD2, fg=TXT, bd=0,
                       activebackground="#243040", activeforeground=AMBER,
@@ -239,6 +243,25 @@ class App(object):
         self.stat = tk.Label(foot, text="就绪", bg=INK, fg=SUB,
                              font=("Microsoft YaHei UI", 10))
         self.stat.pack(side="left", padx=16)
+
+    def selftest(self):
+        """不接遥控器也能验证：合成一段摇杆扫描，直接喂虚拟手柄。
+        打开 joy.cpl → 属性，两个摇杆会各画一个圆。"""
+        if not self.pad or not self.pad.ok:
+            self.say("[自检] 虚拟手柄不可用：%s" % (self.pad.err if self.pad else "未初始化"))
+            self.say("        先装 ViGEmBus 驱动")
+            return
+        self.say("[自检] 开始：左右摇杆各扫一圈 …")
+        def run():
+            import math
+            for k in range(120):
+                a = k / 120.0 * 2 * math.pi
+                x = int(1024 + 600 * math.cos(a)); y = int(1024 + 600 * math.sin(a))
+                self.pad.push([x, y, y, x, 1024, 1024])   # AIL, ELE, THR, RUD
+                time.sleep(0.012)
+            self.pad.push([1024] * 6)
+            self._pending = "[自检] 完成：joy.cpl 里两个摇杆应各画了一个圆"
+        threading.Thread(target=run, daemon=True).start()
 
     def on_mode(self):
         if self.pad:

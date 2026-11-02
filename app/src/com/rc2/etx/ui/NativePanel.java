@@ -112,6 +112,15 @@ public class NativePanel extends Panel {
 
     /** 强制重启原生核心：退出 Lua 报错页、或界面卡死时的兜底入口。 */
     public void restartCore() {
+        // 先把设置刷盘：EdgeTX 是在“离开页面/按 RTN”时写 radio.yml 的，
+        // 直接 shutdown 会让用户在系统设置里改的东西丢掉（用户报的就是这个）。
+        try {
+            for (int i = 0; i < 3; i++) {
+                queueKey(5);          // 5 = RTN
+                tick();
+                Thread.sleep(40);
+            }
+        } catch (Throwable ignored) { }
         try { EtxNative.shutdown(); } catch (Throwable ignored) { }
         inited = false;
         bmp = null;

@@ -78,7 +78,6 @@ public class MainActivity extends Activity implements Host {
         // 开机音 + 启动画面（应用级，不动系统 bootanimation）
         com.rc2.etx.audio.Sfx.setEnabled(com.rc2.etx.radio.Store.loadSfx(this));
         com.rc2.etx.audio.Sfx.boot();
-        showSplash();
         try {
             registerReceiver(usbRx, new IntentFilter(UsbSerial.ACTION_PERMISSION));
         } catch (Throwable t) {
