@@ -100,11 +100,16 @@ public final class StickSmooth {
             if (reverse) { vel[i] = 0f; acc[i] = 0f; }
             vel[i] = vel[i] * (1f - bl) + vNow * bl;
 
-            // 静止（本帧位移在死区内）时把该轴当前值当成"零点"，慢慢学掉校准/物理中点偏差，
-            // 否则用户什么都没动通道也会停在 7%~10%（2026-11-02 实测）。
-            if (hist >= 1 && Math.abs(d) < VEL_DEAD) {
-                zero[i] += 0.12f * (h2[i] - zero[i]);
+            // 2026-11-02 二次修：上一版只看“本帧位移小”就学零点，结果**杆打满停住时**
+            // （d≈0）也会被当成静止 → zero 慢慢追到满杆值 → 满杆读数逐渐变成 0。
+            // 现在只在“所有轴都在中点附近、且整体静止”时学，并且幅度硬限 ±0.06。
+            if (hist >= 1 && allNearCenter() && Math.abs(d) < VEL_DEAD) {
+                float nz = zero[i] + 0.10f * (h2[i] - zero[i]);
+                if (nz > 0.10f) nz = 0.10f;      // 实测静止残差 3~8%，上限放到 10%
+                else if (nz < -0.10f) nz = -0.10f;
+                zero[i] = nz;
             }
+            // 任一轴离开中心区就立即冻结学习（zero 保持不动）
 
             if (hist >= 3) {
                 float vPrev = (h1[i] - h0[i]) / dt1;
@@ -133,6 +138,7 @@ public final class StickSmooth {
         float dt = Math.max(0f, (float) (nowMs - t2));
         float ahead = Math.min(dt, capMs);
         float decay = dt <= capMs ? 1f : (float) Math.exp(-(dt - capMs) / HOLD_DECAY_MS);
+        if (decay < 0.55f) decay = 0.55f;      // 最多回落到 55% 预测量，避免“卡住后慢慢变回去”
         float tau = ahead / 1000f;
 
         for (int i = 0; i < N; i++) {
@@ -141,7 +147,7 @@ public final class StickSmooth {
             float p = h2[i] + vel[i] * ahead + 0.5f * acc[i] * tau * tau * accw;
             if (decay < 1f) p = h2[i] + (p - h2[i]) * decay;
             // 过冲钳制：不超过"最近一步 × over"（再加 6% 绝对余量）
-            float cap = step[i] * over + 0.06f;
+            float cap = step[i] * over + 0.22f;
             if (p > h2[i] + cap) p = h2[i] + cap;
             else if (p < h2[i] - cap) p = h2[i] - cap;
             if (p > 1f) p = 1f;
@@ -151,8 +157,17 @@ public final class StickSmooth {
         return true;
     }
 
+    /** 六轴是否都还在中点附近（用来判定“整机静止”，避免满杆被误当零点）。 */
+    private boolean allNearCenter() {
+        for (int i = 0; i < N; i++) {
+            float a = h2[i] < 0f ? -h2[i] : h2[i];
+            if (a > 0.15f) return false;
+        }
+        return true;
+    }
+
     /** 软死区：|v|<=DZ 直接归零，外面线性展开，穿过中点时不产生台阶。 */
-    private static final float DZ = 0.02f;
+    private static final float DZ = 0.012f;
 
     private static float softDead(float v) {
         float a = v < 0f ? -v : v;
