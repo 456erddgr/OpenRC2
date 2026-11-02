@@ -36,6 +36,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 
 public class MainActivity extends Activity implements Host {
+    private boolean padStreamOn = false;
+
 
     private static final String TAG = "ETX-Main";
     private Radio radio;
@@ -567,8 +569,15 @@ public class MainActivity extends Activity implements Host {
         } else if ("pad".equals(act)) {
             // 虚拟手柄数据流开关：--es action pad --ei on 1/0
             boolean on = i.getIntExtra("on", 1) != 0;
-            radio.setPadStreamOn(on);
-            toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+            // 2026-11-02：PC 端巡检会反复 am start，原来无脑弹 toast -> 隔几秒弹一次盖住画面。
+            // 现在只在状态真的变化时提示，重复请求静默。
+            if (padStreamOn != on) {
+                padStreamOn = on;
+                radio.setPadStreamOn(on);
+                toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+            } else {
+                Log.i(TAG, "intent action=pad on=" + on + " (no change)");
+            }
         } else if ("bindrate".equals(act)) {
             // 自测：--es action bindrate --ei ms 8   调整 RC Pro binder 轮询间隔（0=尽量快）
             int ms = i.getIntExtra("ms", 8);

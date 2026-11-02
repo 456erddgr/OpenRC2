@@ -22,6 +22,7 @@ public final class StickSmooth {
     private boolean has;
 
     // ---- 估计量 ----
+    private final float[] zero = new float[N];   // 每轴零点（校准中点与物理中点的差）
     private final float[] vel = new float[N];
     private final float[] acc = new float[N];
     private final float[] step = new float[N];
@@ -62,7 +63,7 @@ public final class StickSmooth {
     public synchronized void reset() {
         has = false;
         hist = 0;
-        for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; }
+        for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; zero[i] = 0f; }
     }
 
     /** 收到一个新样本时调用一次（单位 -1..1）。 */
@@ -99,6 +100,12 @@ public final class StickSmooth {
             if (reverse) { vel[i] = 0f; acc[i] = 0f; }
             vel[i] = vel[i] * (1f - bl) + vNow * bl;
 
+            // 静止（本帧位移在死区内）时把该轴当前值当成"零点"，慢慢学掉校准/物理中点偏差，
+            // 否则用户什么都没动通道也会停在 7%~10%（2026-11-02 实测）。
+            if (hist >= 1 && Math.abs(d) < VEL_DEAD) {
+                zero[i] += 0.12f * (h2[i] - zero[i]);
+            }
+
             if (hist >= 3) {
                 float vPrev = (h1[i] - h0[i]) / dt1;
                 float aNow = (vel[i] - vPrev) * 1000f / (0.5f * (dt1 + dt2));   // 单位/秒²
@@ -129,7 +136,9 @@ public final class StickSmooth {
         float tau = ahead / 1000f;
 
         for (int i = 0; i < N; i++) {
-            float p = h2[i] + vel[i] * ahead + 0.5f * acc[i] * tau * tau * 1000f * accw;
+            // 2026-11-02 修：原来多乘了 1000（acc 已是「单位/秒²」，tau 已是秒），
+            // 静止时微小的加速度噪声被放大成几十个百分点（用户看到 CH1 35% / CH3 56%）。
+            float p = h2[i] + vel[i] * ahead + 0.5f * acc[i] * tau * tau * accw;
             if (decay < 1f) p = h2[i] + (p - h2[i]) * decay;
             // 过冲钳制：不超过"最近一步 × over"（再加 6% 绝对余量）
             float cap = step[i] * over + 0.06f;
@@ -137,9 +146,20 @@ public final class StickSmooth {
             else if (p < h2[i] - cap) p = h2[i] - cap;
             if (p > 1f) p = 1f;
             else if (p < -1f) p = -1f;
-            out[i] = p;
+            out[i] = softDead(p - zero[i]);
         }
         return true;
+    }
+
+    /** 软死区：|v|<=DZ 直接归零，外面线性展开，穿过中点时不产生台阶。 */
+    private static final float DZ = 0.02f;
+
+    private static float softDead(float v) {
+        float a = v < 0f ? -v : v;
+        if (a <= DZ) return 0f;
+        float n = (a - DZ) / (1f - DZ);
+        if (n > 1f) n = 1f;
+        return v < 0f ? -n : n;
     }
 
     /** 当前样本已经"旧"了多少毫秒（给界面显示用）。 */
