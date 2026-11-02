@@ -83,7 +83,7 @@ public class NativePanel extends Panel {
     private final int[] axes7 = new int[7];
 
     private final RectF dst = new RectF();
-    private final Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final Paint paint = new Paint();   // 最近邻：480x272 放大到 1920x1080 保持像素锐利（双线性会糊）
 
     private final int[] axes = new int[7];
     private final int[] sw = new int[4];
@@ -305,11 +305,16 @@ public class NativePanel extends Panel {
             ui.textC(c, "放好 so 后点此页任意处初始化", body.centerX(), body.top + ui.d(154), 12, Ui.DIM, false);
             return;
         }
+        // 全屏时铺满整块（cover），非全屏时等比留边（fit）
         float sx = body.width() / nw;
         float sy = body.height() / nh;
-        float s = Math.min(sx, sy);
+        float s = full ? Math.max(sx, sy) : Math.min(sx, sy);
         float w = nw * s, h = nh * s;
-        dst.set(body.centerX() - w / 2, body.centerY() - h / 2, body.centerX() + w / 2, body.centerY() + h / 2);
+        float l = body.centerX() - w / 2, t = body.centerY() - h / 2;
+        dst.set(l, t, l + w, t + h);
+        paint.setFilterBitmap(!full);   // 全屏走最近邻，锐利；分屏走双线性，缩小时不锯齿
+        paint.setAntiAlias(!full);
+        paint.setDither(false);
         c.drawBitmap(bmp, null, dst, paint);
         ui.cardStroke(c, dst, Ui.LINE, 1);
         if (!full) ui.textR(c, note, a.right - ui.d(8), a.top + ui.d(14), 10, Ui.DIM, false);

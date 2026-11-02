@@ -75,6 +75,9 @@ public class MainActivity extends Activity implements Host {
         setContentView(view, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // 沉浸式全屏：隐藏状态栏与导航栏，画面真正铺满 1920x1080（用户：现在不是全屏、还糊）
+        applyImmersive();
+
         // 开机音 + 启动画面（应用级，不动系统 bootanimation）
         com.rc2.etx.audio.Sfx.setEnabled(com.rc2.etx.radio.Store.loadSfx(this));
         com.rc2.etx.audio.Sfx.boot();
@@ -129,7 +132,31 @@ public class MainActivity extends Activity implements Host {
         if (!radio.isRunning()) radio.start();
     }
 
+    /** 沉浸式全屏（切回来时也重新隐藏，避免被系统"拉出"状态栏）。 */
+    private void applyImmersive() {
+        try {
+            View dv = getWindow().getDecorView();
+            dv.setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();
+                lp.layoutInDisplayCutoutMode =
+                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                getWindow().setAttributes(lp);
+            }
+        } catch (Throwable t) { android.util.Log.w("ETX", "immersive fail", t); }
+    }
+
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) applyImmersive();
+    }
+
     protected void onPause() {
         // 用户切走/按 Home 时也要落盘，否则“系统设置改了又回去”就丢了
         if (view != null) view.flushNativeSettings();
