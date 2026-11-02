@@ -23,7 +23,7 @@ import java.net.Socket;
 public class PadStream {
 
     public static final int PORT = 9999;
-    private static final int HZ_MS = 8;
+    private static final int HZ_MS = 4;
 
     private volatile boolean want = false;
     private volatile boolean running = false;

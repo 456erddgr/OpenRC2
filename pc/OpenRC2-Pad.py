@@ -81,8 +81,11 @@ class Pad(object):
     """mode: xbox=完整 Xbox360；fvp=穿越机手感（只摇杆、expo）"""
     def __init__(self):
         self.pad = None; self.mode = "xbox"
-        self.deadzone = 0.06; self.expo = 1.0
+        self.deadzone = 0.02; self.expo = 1.0
         self.ok = False; self.err = ""
+        ok, msg = ensure_driver()
+        if not ok:
+            self.ok = False; self.err = msg; return
         try:
             import vgamepad as vg
             self.pad = vg.VX360Gamepad(); self.ok = True
@@ -301,7 +304,14 @@ class App(object):
             self.say("      先 adb connect <遥控器IP>:5555，或插 USB 开调试")
         if self.pad and not self.pad.ok:
             self.say("[vigem] 虚拟手柄不可用：%s" % self.pad.err)
-            self.say("        装 ViGEmBus 驱动后可获得虚拟手柄")
+            self.say("        正在尝试用内置驱动修复…")
+            self.root.update()
+            self.pad = Pad()
+            if self.pad.ok:
+                self.say("[vigem] 驱动已就绪（内置 ViGEmBus 已安装）")
+            else:
+                self.say("[vigem] 仍不可用：%s" % self.pad.err)
+                self.say("        日志：%s" % _log_path())
         self.link = Link(self.on_frame, self.on_state)
         self.link.start()
         self.running = True
@@ -318,6 +328,7 @@ class App(object):
         self.say("已停止")
 
     def on_frame(self, ax):
+        # 数据线程只做一件事：立刻推给 ViGEm（延迟优先）；界面由 _tick 以 16fps 读 latest
         if self.pad:
             self.pad.push(ax)
 
