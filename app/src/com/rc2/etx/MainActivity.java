@@ -569,6 +569,13 @@ public class MainActivity extends Activity implements Host {
             boolean on = i.getIntExtra("on", 1) != 0;
             radio.setPadStreamOn(on);
             toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+        } else if ("bindrate".equals(act)) {
+            // 自测：--es action bindrate --ei ms 8   调整 RC Pro binder 轮询间隔（0=尽量快）
+            int ms = i.getIntExtra("ms", 8);
+            getSharedPreferences("etx", 0).edit()
+                    .putInt("rcproPollMs", ms).apply();
+            com.rc2.etx.input.RcProService.pollIntervalMs = ms;
+            Log.i(TAG, "intent action=bindrate ms=" + ms);
         } else if ("vbat".equals(act)) {
             // 自测预警音：--es action vbat --ei mv 3000（低于 radio.yml 的电池警告阈值即触发）
             int mv = i.getIntExtra("mv", 3000);

@@ -41,6 +41,11 @@ public class RcProService extends Service {
     };
 
     private volatile boolean transactBusy;
+
+    /** 轮询间隔（ms）。默认 8ms，可用 --es action bindrate --ei ms N 改；0 表示"背压自适应"。 */
+    public static volatile int pollIntervalMs = 0;
+    private android.content.SharedPreferences sp;
+    private static volatile long statFrom, statPolls, statSkips, statReplies, statChanges;
     private int cbLog;
     private final List<Messenger> clients = new ArrayList<Messenger>();
     private volatile int[] lastValues;
@@ -77,6 +82,14 @@ public class RcProService extends Service {
                     cbLog++;
                     Log.i(TAG, "chan=" + vals[0] + "," + vals[1] + "," + vals[2]
                             + "," + vals[3] + "," + vals[4] + "," + vals[5] + " bytes=" + bytes.length);
+                }
+                statReplies++;
+                int[] prev = lastValues;
+                if (prev == null || prev.length != vals.length) statChanges++;
+                else {
+                    for (int k = 0; k < vals.length; k++) {
+                        if (prev[k] != vals[k]) { statChanges++; break; }
+                    }
                 }
                 lastValues = vals;
                 lastAt = System.currentTimeMillis();
@@ -132,7 +145,8 @@ public class RcProService extends Service {
     private void pollOnce() {
         // 审计修复：重入保护必须放在最前面。以前写在 try 里，早退时 finally 仍会把
         // transactBusy 清成 false —— 等于把**另一个线程**的锁放掉，双份 transact 又回来了。
-        if (transactBusy) return;
+        statPolls++;
+        if (transactBusy) { statSkips++; return; }
         transactBusy = true;
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
@@ -171,12 +185,33 @@ public class RcProService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         running = true;
+        sp = getSharedPreferences("etx", 0);
+        pollIntervalMs = sp.getInt("rcproPollMs", pollIntervalMs);
         Thread t = new Thread(new Runnable() {
             public void run() {
+                statFrom = System.currentTimeMillis();
                 while (running) {
                     try {
                         pollOnce();
-                        Thread.sleep(100);      // README: 建议 ≤150ms，再快 binder 掉包
+                        if (pollIntervalMs <= 0) {
+                            // 0 = 高频模式：Thread.sleep(1) 在这台机器上实际会睡 ~50ms（实测只有 20Hz），
+                            // 所以用忙等的纳米计时做 ~100Hz 节流，既比 sleep 准，又不至于 400Hz 满负荷。
+                            long until = System.nanoTime() + 10_000_000L;
+                            while (System.nanoTime() < until) Thread.yield();
+                        } else {
+                            Thread.sleep(pollIntervalMs);
+                        }
+                        long now = System.currentTimeMillis();
+                        if (now - statFrom >= 2000) {
+                            Log.i("ETXRcPro", "stat pollHz=" + (statPolls * 1000 / (now - statFrom))
+                                    + " replyHz=" + (statReplies * 1000 / (now - statFrom))
+                                    + " changeHz=" + (statChanges * 1000 / (now - statFrom))
+                                    + " skip=" + statSkips + " poll=" + statPolls
+                                    + " iv=" + pollIntervalMs);
+                            int iv = sp.getInt("rcproPollMs", pollIntervalMs);
+                            pollIntervalMs = iv;
+                            statFrom = now; statPolls = 0; statSkips = 0; statReplies = 0; statChanges = 0;
+                        }
                     } catch (Throwable t) {
                         try { Thread.sleep(200); } catch (InterruptedException ignore) { }
                     }
