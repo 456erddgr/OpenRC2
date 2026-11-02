@@ -35,6 +35,9 @@ public final class Radio {
     public final DumlStick duml = new DumlStick();
     /** USB HID 手柄（PC 模拟器用）。只有在 /dev/hidg0 存在且 root 建好 gadget 后才能真正发报文。 */
     public final com.rc2.etx.usb.HidJoystick hid = new com.rc2.etx.usb.HidJoystick();
+
+    /** 虚拟手柄数据流（PC 端 ViGEm 造手柄，走 adb reverse 本地 TCP，无需 root）。 */
+    public final com.rc2.etx.usb.PadStream padStream = new com.rc2.etx.usb.PadStream();
     /** 原生核心算出来的真实通道 us（172..1811），由 NativePanel 每帧刷新；HID 用它当唯一真相源。 */
     public final int[] hidUs = new int[CH_COUNT];
     public volatile boolean hidUsValid = false;
@@ -130,6 +133,11 @@ public final class Radio {
         }
         lastStickFrameAt = SystemClock.elapsedRealtime();
         startRcProIfAny();
+
+        // 开关文件存在就自启虚拟手柄数据流（PC 侧 ViGEm 方案，不依赖 root）
+        try {
+            if (com.rc2.etx.usb.PadStream.flagFile(ctx).exists()) padStream.start(ctx);
+        } catch (Throwable ignore) { }
         if (dumlOn) {
             start();
             duml.start();
@@ -303,6 +311,40 @@ public final class Radio {
     }
 
     public boolean isHidOn() { return hidOn; }
+
+    /** 一帧 JSON：6 路原始值（0..2048）+ 8 路输出 us，给 PC 侧虚拟手柄用。 */
+    public String padFrameJson() {
+        int[] r = duml.raw;
+        StringBuilder b = new StringBuilder(96);
+        b.append("{\"t\":").append(System.currentTimeMillis()).append(",\"ax\":[");
+        for (int i = 0; i < 6; i++) {
+            if (i > 0) b.append(',');
+            b.append(i < r.length ? r[i] : 1024);
+        }
+        b.append("],\"us\":[");
+        for (int i = 0; i < 8; i++) {
+            if (i > 0) b.append(',');
+            b.append(hidUsValid && i < CH_COUNT ? hidUs[i] : 1500);
+        }
+        b.append("]}");
+        return b.toString();
+    }
+
+    public void setPadStreamOn(boolean on) {
+        try {
+            java.io.File f = com.rc2.etx.usb.PadStream.flagFile(ctx);
+            if (on) {
+                if (!f.exists()) f.createNewFile();
+                padStream.start(ctx);
+            } else {
+                padStream.stop();
+                if (f.exists()) f.delete();
+            }
+        } catch (Throwable ignore) { }
+        save();
+    }
+
+    public boolean isPadStreamOn() { return padStream.isWanted(); }
 
     /** 固定 4ms 节拍把最新值发给 /dev/hidg0；节点没开就定期重试，避免"重启后第一次开失败就再也不发"。 */
     private void startHidLoop() {

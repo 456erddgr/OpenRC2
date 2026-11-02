@@ -237,3 +237,48 @@ I ETX-Radio: binder 补帧 #3
 - `127.0.0.1:40007` 每 3~6 秒被 `dji_link` RST，协议层订阅细节未攻下；已用 binder 补帧缓解（见上）。
 - 蓝牙 HID 设备模式：本机蓝牙栈只有 `HidHostService`，无 `HidDeviceService`，**不可行**。
 - HID 手柄需一次性 root 授权（建 USB gadget 是内核操作）；授权被拒时右下角会提示「已被拒绝超级用户权限」。
+
+## 虚拟手柄（PC 端 ViGEm，无需 root）
+
+这条路是照 RM510 那套「遥控器 → adb reverse → PC 造手柄」的做法实现的，和上面的 USB HID 是**两条独立的路**：
+
+| | USB HID（内置） | 虚拟手柄（ViGEm） |
+|---|---|---|
+| 需要 root | **是**（建 gadget、绑 UDC） | **否** |
+| 传输 | USB 线，`/dev/hidg0` 写报告 | `adb reverse` 的本地 TCP，或同一 WiFi |
+| PC 侧 | 免装驱动，系统自带 Xbox 兼容 HID | 需装 ViGEmBus 驱动 + `pip install vgamepad` |
+| 稳定性 | 绑 gadget 会顶掉 USB adb，换线要重建 | 不断线，断了自动重连 |
+| 适用 | 只想插线玩游戏机/模拟器 | 不想 root、要调试、要无线 |
+
+### 用法
+
+1. 遥控器：`设置 → 诊断` 里能看到数据流状态；或命令行打开
+   ```bash
+   adb shell am start -n com.rc2.etx/.MainActivity --es action pad --ei on 1
+   ```
+   （关掉把 `--ei on 1` 换成 `--ei on 0`）
+
+2. PC：
+   ```bash
+   pip install vgamepad
+   # 装一次 ViGEmBus 驱动：https://github.com/nefarius/ViGEmBus/releases
+   python pc/OpenRC2-虚拟手柄.py
+   ```
+   脚本会自己 `adb reverse tcp:9999 tcp:9999`，然后在系统里造出一个 **Xbox 360 手柄**。
+   验证：`Win+R → joy.cpl → Xbox 360 Controller → 属性`，推摇杆看十字线。
+
+3. 只想验证数据有没有通：`python pc/OpenRC2-虚拟手柄.py --dry`，会打印收到的帧和帧率。
+
+### 协议（想自己写客户端可以照着实现）
+
+设备端连 `127.0.0.1:9999`，**8ms 一帧、一行一个 JSON**：
+
+```json
+{"t":1793584460143,"ax":[1024,1024,1024,1024,1024,1024],"us":[1500,1500,1500,1500,1500,1500,1500,1500]}
+```
+
+- `t`：设备毫秒时间戳
+- `ax`：六路原始值，`0..2048`，中位 `1024`，满行程 `1024±660`（顺序：左水平、左竖直、右竖直、右水平、左波轮、右波轮）
+- `us`：八路输出 PWM（`1000..2000`，HID 未启用时为 1500）
+
+实测：6 秒收 694 帧、**≈116 fps**、66 KB（`pad_test.txt`）。

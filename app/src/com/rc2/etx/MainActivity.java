@@ -501,6 +501,11 @@ public class MainActivity extends Activity implements Host {
             final boolean on = i.getIntExtra("on", 0) != 0;
             view.post(new Runnable() { public void run() { view.setFullNative(on); } });
             Log.i(TAG, "intent action=full on=" + on);
+        } else if ("pad".equals(act)) {
+            // 虚拟手柄数据流开关：--es action pad --ei on 1/0
+            boolean on = i.getIntExtra("on", 1) != 0;
+            radio.setPadStreamOn(on);
+            toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
         } else if ("page".equals(act)) {
             view.setPage(i.getIntExtra("p", 0));
         } else if ("sink".equals(act)) {
