@@ -228,7 +228,7 @@ public class CalibPage extends Panel {
 
         // 插帧校准：把当前姿态锁成插帧零点（用户要求“校准里带插帧校准”）
         btnC.set(a.centerX() - bw * 0.95f, by - bh * 1.45f, a.centerX() + bw * 0.95f, by - bh * 0.45f);
-        btn(c, btnC, snapArmed ? "插帧零点已锁 ✓" : "插帧校准（先回中再点）", true, h);
+        btn(c, btnC, snapArmed ? "插帧归零已锁 ✓（点此重锁）" : "插帧归零（先回中再点）", true, h);
     }
 
     private void disk(Canvas c, float cx, float cy, float rad, int axV, int axH, String label) {
@@ -260,8 +260,9 @@ public class CalibPage extends Panel {
 
     @Override public boolean down(int id, float x, float y) {
         if (btnC.contains(x, y)) {
-            radio.stickSmooth().snapZero();     // 当前姿态锁成插帧零点
+            radio.stickSmooth().snapZero();      // 一键：当前姿态锁成插帧零点
             snapArmed = true;
+            hint = "插帧零点已锁定（六轴）";
             return true;
         }
         if (btnA.contains(x, y)) { begin(); return true; }

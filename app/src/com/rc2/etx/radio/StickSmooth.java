@@ -25,7 +25,15 @@ public final class StickSmooth {
     private final float[] zero = new float[N];   // 每轴零点（校准中点与物理中点的差）
     private final float[] spanObs = {0f,0f,0f,0f,0f,0f};  // 每轴实测最大行程（0=还没观测到）
     private final float[] lastOut = new float[N];         // 上一帧输出
-    private final float[] y = new float[N];               // 每轴低通后的目标位置（10Hz 更新）
+    private final float[] y = new float[N];
+    private final float[] yPrev = new float[N];   // 上一原生帧的低通值
+    private final float[] yLast = new float[N];   // 最新原生帧的低通值
+    private long tPrev = 0L, tLast = 0L;               // 每轴低通后的目标位置（10Hz 更新）
+    // 每轴完整校准（中点 + 正/负行程），由校准页「插帧完整校准」写入
+    private final float[] calMid = new float[N];
+    private final float[] calNeg = {1f,1f,1f,1f,1f,1f};
+    private final float[] calPos = {1f,1f,1f,1f,1f,1f};
+    private final boolean[] calOk = new boolean[N];   // 每轴是否已写入完整校准
     private final float[] vel = new float[N];
     private final float[] acc = new float[N];
     private final float[] step = new float[N];
@@ -37,7 +45,7 @@ public final class StickSmooth {
     private static final float SLEW = 0.085f;       // 每帧最大变化量（≈120ms 满行程）
 
     // ---- 档位 ----
-    public static volatile int level = 2;
+    public static volatile int level = 3;
 
     /** 每档：(预测上限 ms, 速度平滑, 加速度权重倍数, 过冲倍数)。 */
     private static final float[] LVL_CAP   = {   0f,  50f, 100f, 150f, 220f, 100f };
@@ -67,7 +75,9 @@ public final class StickSmooth {
     public synchronized void reset() {
         has = false;
         hist = 0;
-        for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; zero[i] = 0f; }
+        for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; zero[i] = 0f;
+            y[i] = 0f; yPrev[i] = 0f; yLast[i] = 0f; }
+        tPrev = 0L; tLast = 0L;
     }
 
     /** 收到一个新样本时调用一次（单位 -1..1）。 */
@@ -81,6 +91,9 @@ public final class StickSmooth {
             t0 = nowMs - 100L; t1 = nowMs - 50L; t2 = nowMs;
             hist = 1;
             for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; }
+            for (int i = 0; i < N; i++) { y[i] = nv[i]; yPrev[i] = nv[i]; yLast[i] = nv[i]; }
+            tPrev = nowMs - 100L;
+            tLast = nowMs;
             has = true;
             lastArriveMs = nowMs;
             return;
@@ -89,6 +102,8 @@ public final class StickSmooth {
         // 平移历史
         for (int i = 0; i < N; i++) { h0[i] = h1[i]; h1[i] = h2[i]; h2[i] = nv[i]; }
         t0 = t1; t1 = t2; t2 = nowMs;
+        tPrev = tLast;
+        tLast = nowMs;
         if (hist < 3) hist++;
 
         float dt1 = Math.max(8f, (float) (t1 - t0));
@@ -109,6 +124,8 @@ public final class StickSmooth {
             if (hist == 1 || dd < 0.004f) y[i] = h2[i];      // 静止/微动：零滞后
             else if (dd > 0.05f) y[i] = h2[i];               // 真实大动作：直通，保跟随
             else y[i] += 0.80f * (h2[i] - y[i]);             // 中间小幅：轻度平滑，抑制抖动
+            yPrev[i] = yLast[i];
+            yLast[i] = y[i];
 
             // 2026-11-02 二次修：上一版只看“本帧位移小”就学零点，结果**杆打满停住时**
             // （d≈0）也会被当成静止 → zero 慢慢追到满杆值 → 满杆读数逐渐变成 0。
@@ -148,46 +165,61 @@ public final class StickSmooth {
             for (int i = 0; i < N; i++) out[i] = h2[i];
             return true;
         }
-        float over = LVL_OVER[level];
-        float accw = LVL_ACCW[level] * ACC_W;
-        float dt = Math.max(0f, (float) (nowMs - t2));
-        float ahead = Math.min(dt, capMs);
-        float decay = dt <= capMs ? 1f : (float) Math.exp(-(dt - capMs) / HOLD_DECAY_MS);
-        if (decay < 0.55f) decay = 0.55f;      // 最多回落到 55% 预测量，避免“卡住后慢慢变回去”
-        float tau = ahead / 1000f;
-
-        // 统一基准：所有轴用同一个行程归一（否则每个轴手感不同）
-        float gs = 0f;
-        for (int i = 0; i < N; i++) {
-            float so = spanObs[i];
-            if (so < 0.75f) so = 0.75f;
-            if (so > 1f) so = 1f;
-            gs += so;
-        }
-        gs /= N;
-        if (gs < 0.75f) gs = 0.75f;
-
-        // 档位只决定“逼近速度”，不再做加速度外推 → 不会抽搐、不会穿零点
-        float rate = 0.085f + 0.015f * (float) level;   // 每帧最大逼近量
-        if (rate > 0.16f) rate = 0.16f;
+        // 只依据「原生帧」推算：在上一帧(yPrev)与最新帧(yLast)之间按时间线性插值，
+        // u 夹在 [0,1] → 不预测、不外推、不会越过最新真实帧（用户要求：只能在原生帧上推算）。
+        // 帧间插值窗口：最多 45ms 就走完「上一帧→最新帧」，然后停在最新帧上（不越过、不预测）。
+        // 原生帧间隔约 100ms，若按整段 100ms 匀速插值，手感会像“晚一帧”（用户实测：延迟大、稳态打不满）。
+        float win = (tLast <= tPrev) ? 1f : (float) (tLast - tPrev);
+        if (win > 45f) win = 45f;
+        if (win < 20f) win = 20f;
+        float u = (nowMs - tLast) / win;
+        if (u < 0f) u = 0f;
+        if (u > 1f) u = 1f;
 
         for (int i = 0; i < N; i++) {
             float z = zero[i];
-            float span = 1f - (z < 0f ? -z : z);
-            if (span < 0.5f) span = 0.5f;
-            float tgt = (y[i] - z) / span / gs;
+            float base = yPrev[i] + (yLast[i] - yPrev[i]) * u;   // 帧间插值后的位置
+            float tgt;
+            if (calOk[i]) {
+                float d2 = base - calMid[i];
+                tgt = d2 >= 0f ? d2 / calPos[i] : d2 / calNeg[i];
+            } else {
+                // 不再做「行程放大」：比例完全由硬件/校准页的单位换算给出（units() 已按轴负/正行程归一），
+                // 插帧只负责去掉零点偏置 → 不自己编造增益（用户要求：只在原生帧上推算）。
+                tgt = base - z;
+            }
             if (tgt > 1f) tgt = 1f;
             else if (tgt < -1f) tgt = -1f;
-            tgt = softDead(tgt);
-            float prev = lastOut[i];
-            float d = tgt - prev;
-            if (d > rate) d = rate;
-            else if (d < -rate) d = -rate;
-            lastOut[i] = prev + d;
-            out[i] = lastOut[i];
+            out[i] = softDead(tgt);
         }
         return true;
     }
+
+    /** 写入单轴完整校准（mid 中点，neg 负行程长度，pos 正行程长度，均为 -1..1 归一后的量）。 */
+    public synchronized void setAxisCal(int i, float mid, float neg, float pos) {
+        if (i < 0 || i >= N) return;
+        if (neg < 0.15f) neg = 0.15f;
+        if (pos < 0.15f) pos = 0.15f;
+        calMid[i] = mid;
+        calNeg[i] = neg;
+        calPos[i] = pos;
+        calOk[i] = true;
+        zero[i] = 0f;                 // 有了显式中点就不再叠加零点学习
+        lastOut[i] = 0f;
+    }
+
+    public synchronized void clearAxisCal() {
+        for (int k = 0; k < N; k++) calOk[k] = false;
+        for (int i = 0; i < N; i++) { calMid[i] = 0f; calNeg[i] = 1f; calPos[i] = 1f; }
+    }
+
+    public synchronized boolean hasAxisCal() {
+        for (int k = 0; k < N; k++) if (calOk[k]) return true;
+        return false;
+    }
+
+    /** 该轴行程是否已校准（供校准页判断）。 */
+    public synchronized boolean axisCalOk(int i) { return i >= 0 && i < N && calOk[i]; }
 
     /** 一次性把当前值当作零点（开机静止、或用户在校准页点“插帧校准”）。 */
     public synchronized void snapZero() {

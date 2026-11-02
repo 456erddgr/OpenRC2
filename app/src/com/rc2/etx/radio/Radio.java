@@ -345,6 +345,12 @@ public final class Radio {
 
     /** 一帧 JSON：6 路原始值（0..2048）+ 8 路输出 us，给 PC 侧虚拟手柄用。 */
     /** 插帧后的六轴（DJI/MCU 序 RH,RV,LV,LH,P1,P2，0..2048），电脑端也要吃到插帧值。 */
+    /** 插帧后的六轴原始值（供校准页复用，避免每帧分配）。 */
+    public void smoothedRaw6(int[] out) {
+        int[] r = smoothedRaw6();
+        System.arraycopy(r, 0, out, 0, Math.min(6, out.length));
+    }
+
     public int[] smoothedRaw6() {
         int[] o = new int[6];
         long nowMs = android.os.SystemClock.uptimeMillis();
