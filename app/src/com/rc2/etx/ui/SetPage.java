@@ -20,7 +20,7 @@ public class SetPage extends Panel {
     private final String[] desc = {"开＝把摇杆送到电脑，模拟器里当手柄用",
                                    "自动识别 RC2 / RC Pro，可手动指定",
                                    "跟随 SD 卡 THEMES 目录",
-                                   "关/弱/中/强：越强越顺，预测也越多",
+                                   "关/弱/中/强/极强/极速：越往后延迟越低",
                                    "推哪根认哪根，不用选反向",
                                    "导出 sd_probe / hid / native"};
     private final String[] val = {"关", "自动", "v15", "中", "未校准", "点此导出"};
