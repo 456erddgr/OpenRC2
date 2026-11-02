@@ -309,6 +309,8 @@ class App(object):
                              font=("Microsoft YaHei UI", 10))
         self.stat.pack(side="left", padx=16)
         self._chrome()
+        _set_icon(self.root)
+        self.root.deiconify(); self.root.lift(); self.root.focus_force()
 
     # ---------- 外观：无边框 + 圆角 + 磨砂（Win10/11 acrylic） ----------
     def _chrome(self):
@@ -373,7 +375,7 @@ class App(object):
             _fields_ = [("Attribute", ctypes.c_int), ("Data", ctypes.c_void_p),
                         ("SizeOfData", ctypes.c_size_t)]
 
-        accent = ACCENT(4, 2, 0xCC1A1F26, 0)   # 4 = ACRYLICBLURBEHIND，颜色 ABGR
+        accent = ACCENT(4, 2, 0xF21A1F26, 0)   # 4 = ACRYLICBLURBEHIND，颜色 ABGR
         data = WCADATA(19, ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p),
                        ctypes.sizeof(accent))
         ctypes.windll.user32.SetWindowCompositionAttribute(hwnd, ctypes.byref(data))

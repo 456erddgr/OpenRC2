@@ -308,12 +308,14 @@ public class NativePanel extends Panel {
         // 全屏时铺满整块（cover），非全屏时等比留边（fit）
         float sx = body.width() / nw;
         float sy = body.height() / nh;
-        float s = full ? Math.max(sx, sy) : Math.min(sx, sy);
+        // 铺满优先：只要目标区域比源图"胖"或"瘦"，就用 cover（裁边不糊边）
+        float s = Math.max(sx, sy);
         float w = nw * s, h = nh * s;
         float l = body.centerX() - w / 2, t = body.centerY() - h / 2;
         dst.set(l, t, l + w, t + h);
-        paint.setFilterBitmap(!full);   // 全屏走最近邻，锐利；分屏走双线性，缩小时不锯齿
-        paint.setAntiAlias(!full);
+        // 一律最近邻：480x272 放大到 1920x1080 绝对不能开双线性，否则一定糊
+        paint.setFilterBitmap(false);
+        paint.setAntiAlias(false);
         paint.setDither(false);
         c.drawBitmap(bmp, null, dst, paint);
         ui.cardStroke(c, dst, Ui.LINE, 1);

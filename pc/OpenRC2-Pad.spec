@@ -5,7 +5,7 @@ a = Analysis(
     ['OpenRC2-Pad.py'],
     pathex=[],
     binaries=[],
-    datas=[('backgrounds', 'backgrounds'), ('driver', 'driver'), ('platform-tools', 'platform-tools'), ('OpenRC2-启动.bat', '.')],
+    datas=[('icon.png', '.'), ('backgrounds', 'backgrounds'), ('driver', 'driver'), ('platform-tools', 'platform-tools'), ('OpenRC2-启动.bat', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['icon.ico'],
 )
