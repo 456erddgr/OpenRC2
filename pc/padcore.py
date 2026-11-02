@@ -24,6 +24,9 @@ class State(object):
     def __init__(self):
         self.lock = threading.Lock()
         self.ax = [1024] * 6
+        self.prev = [1024] * 6
+        self.t_last = 0.0
+        self.dt_src = 0.0
         self.frames = 0
         self.fps = 0.0
         self.connected = False
@@ -38,7 +41,7 @@ class State(object):
 
     def snap(self):
         with self.lock:
-            return {"ax": list(self.ax), "frames": self.frames, "fps": round(self.fps, 1),
+            return {"ax": predict(), "raw": list(self.ax), "frames": self.frames, "fps": round(self.fps, 1),
                     "connected": self.connected, "src": self.src, "mode": self.mode,
                     "model": self.model, "padOk": self.pad_ok, "padErr": self.pad_err,
                     "running": self.running}
@@ -48,9 +51,34 @@ ST = State()
 PAD = None
 
 
+PRED_CAP_MS = 260          # 最多外推 260ms（再长就贴住最新采样，避免过冲）
+PRED_MAX_V = 2200.0        # 每秒最大变化（单位/秒），防止抖动放大
+
+
+def predict():
+    """用最近两次采样算速度，按经过时间外推，喂给 UI 做 60/120fps 平滑。
+    源只有约 3Hz，这一步把"卡顿感"变成"跟手"，但不会创造真实带宽。"""
+    now = time.time()
+    if not ST.t_last:
+        return list(ST.ax)
+    age = now - ST.t_last
+    if age > PRED_CAP_MS / 1000.0 or ST.dt_src <= 0:
+        return list(ST.ax)
+    out = []
+    for i in range(6):
+        v = (ST.ax[i] - ST.prev[i]) / ST.dt_src
+        v = max(-PRED_MAX_V, min(PRED_MAX_V, v))
+        out.append(int(max(0, min(2047, ST.ax[i] + v * age))))
+    return out
+
+
 def on_frame(ax):
+    now = time.time()
     with ST.lock:
+        ST.prev = ST.ax
         ST.ax = list(ax)
+        ST.dt_src = max(0.02, min(0.6, now - ST.t_last)) if ST.t_last else 0.1
+        ST.t_last = now
         ST.frames += 1
         dt = time.time() - ST.t0
         if dt >= 0.5:
