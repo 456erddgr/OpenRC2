@@ -13,11 +13,192 @@ PORT_HTTP = 9998
 
 
 def _load_pad_module():
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "OpenRC2-Pad.py")
+    p = _res("OpenRC2-Pad.py")
+    if not os.path.exists(p):
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "OpenRC2-Pad.py")
     spec = importlib.util.spec_from_file_location("padmod", p)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m
+
+
+def _res(rel):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
+def adb_exe():
+    cands = [_res(os.path.join("platform-tools", "adb.exe")),
+             os.path.join(os.path.dirname(os.path.abspath(__file__)), "platform-tools", "adb.exe")]
+    la = os.environ.get("LOCALAPPDATA", "")
+    if la:
+        cands.append(os.path.join(la, "Android", "Sdk", "platform-tools", "adb.exe"))
+    for c in cands:
+        if os.path.exists(c):
+            return c
+    return "adb"
+
+
+def _run_adb(args, timeout=8):
+    import subprocess
+    try:
+        r = subprocess.run([adb_exe()] + args, capture_output=True, timeout=timeout,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode, (r.stdout or b"").decode("utf-8", "ignore"), (r.stderr or b"").decode("utf-8", "ignore")
+    except Exception as e:
+        return -1, "", str(e)
+
+
+def adb_devices():
+    rc, out, err = _run_adb(["devices"])
+    if rc != 0:
+        return [], (err or "adb 不可用")
+    devs = []
+    for line in out.splitlines()[1:]:
+        line = line.strip()
+        if not line or "	" not in line:
+            continue
+        name, state = line.split("	", 1)
+        if state.strip() == "device":
+            devs.append(name.strip())
+    return devs, ""
+
+
+def ensure_reverse(verbose=False):
+    """建 adb 反向端口并把遥控器端的推流打开。返回 (ok, msg)。"""
+    devs, err = adb_devices()
+    if not devs:
+        return False, "没找到已连接的遥控器（" + (err or "请插 USB 或开无线调试") + "）"
+    dev = devs[0]
+    rc, out, err = _run_adb(["-s", dev, "reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
+    if rc != 0:
+        return False, "adb reverse 失败：" + (err or out or "未知错误")[:80]
+    _run_adb(["-s", dev, "shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+              "--es", "action", "pad", "--ei", "on", "1"])
+    ST.adb_dev = dev
+    ST.adb_msg = "已连接 " + dev
+    return True, ST.adb_msg
+
+
+class Link(threading.Thread):
+    """遥控器推流接收端 0.0.0.0:9999，每行一个 JSON {ax:6 个 0..2047}。"""
+
+    NL = bytes([10])
+
+    def __init__(self, on_frame, on_state):
+        super().__init__(daemon=True)
+        self.on_frame = on_frame
+        self.on_state = on_state
+        self.srv = None
+        self.stop_flag = False
+        self.frames = 0
+        self.connected = False
+        self.latest = [1024] * 6
+
+    def run(self):
+        try:
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind(("0.0.0.0", PORT_LINK))
+            srv.listen(4)
+            srv.settimeout(1.0)
+            self.srv = srv
+            self.on_state("等待遥控器连接 0.0.0.0:%d" % PORT_LINK)
+        except Exception as e:
+            self.on_state("端口被占用：%s" % e)
+            return
+        while not self.stop_flag:
+            try:
+                conn, addr = srv.accept()
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+            self.connected = True
+            self.on_state("已连接 %s" % (addr[0],))
+            buf = bytes()
+            try:
+                while not self.stop_flag:
+                    d = conn.recv(8192)
+                    if not d:
+                        break
+                    buf += d
+                    while self.NL in buf:
+                        line, buf = buf.split(self.NL, 1)
+                        if not line.strip():
+                            continue
+                        try:
+                            f = json.loads(line.decode("utf-8", "replace"))
+                        except Exception:
+                            continue
+                        ax = f.get("ax") or [1024] * 6
+                        self.latest = ax
+                        self.frames += 1
+                        self.on_frame(ax)
+            except Exception:
+                pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self.connected = False
+            self.on_state("遥控器断开，等待重连 …")
+
+    def stop(self):
+        self.stop_flag = True
+        try:
+            if self.srv:
+                self.srv.close()
+        except Exception:
+            pass
+
+
+class VPad(object):
+    """自带的最小虚拟手柄（不依赖 GUI 模块，避免 tkinter 依赖）。
+    轴序 = 遥控器 DUML 原始 6 轴：[0]副翼 [1]俯仰 [2]油门 [3]偏航 [4][5]波轮。
+    左摇杆 = 偏航(ax3,X) + 油门(ax2,Y)；右摇杆 = 副翼(ax0,X) + 俯仰(ax1,Y)。"""
+
+    def __init__(self):
+        self.pad = None
+        self.mode = "xbox"
+        self.deadzone = 0.02
+        self.expo = 1.0
+        self.ok = False
+        self.err = ""
+        try:
+            import vgamepad as vg
+        except Exception as e:
+            self.err = "缺少 vgamepad 模块：" + str(e)[:120]
+            return
+        try:
+            self.pad = vg.VX360Gamepad()
+            self.ok = True
+        except Exception as e:
+            self.err = "ViGEmBus 未就绪：" + str(e)[:120]
+
+    def _n(self, v):
+        x = (float(v) - 1024.0) / 1024.0
+        if abs(x) < self.deadzone:
+            x = 0.0
+        else:
+            s = 1.0 if x > 0 else -1.0
+            x = s * pow(abs(x), max(0.2, self.expo))
+        return max(-1.0, min(1.0, x))
+
+    def push(self, ax):
+        if not self.ok or not ax or len(ax) < 6:
+            return
+        try:
+            self.pad.left_joystick_float(x_value_float=self._n(ax[3]), y_value_float=-self._n(ax[2]))
+            self.pad.right_joystick_float(x_value_float=self._n(ax[0]), y_value_float=-self._n(ax[1]))
+            self.pad.left_trigger(value=0)
+            self.pad.right_trigger(value=0)
+            self.pad.update()
+        except Exception as e:
+            self.ok = False
+            self.err = "推手柄失败：" + str(e)[:120]
+
 
 
 class State(object):
@@ -44,7 +225,9 @@ class State(object):
         self.vel = [0.0]*6
         self.acc = [0.0]*6
         self.step = [0.0]*6
-        self.pred = 2          # 0关 1弱 2中 3强
+        self.pred = 2
+        self.adb_dev = ""
+        self.adb_msg = "未连接 adb"          # 0关 1弱 2中 3强
         self.hz = 0.0          # 源采样率（平滑后）
         self.deadzone = 6
         self.expo = 1.0
@@ -54,7 +237,7 @@ class State(object):
             lag = int((time.time() - self.t_last) * 1000) if self.t_last else -1
             return {"ax": predict(), "raw": list(self.ax), "frames": self.frames, "fps": round(self.fps, 1),
                     "pred": int(self.pred), "lagMs": lag, "srcHz": round(self.hz, 1),
-                    "connected": self.connected, "src": self.src, "mode": self.mode,
+                    "connected": self.connected, "adb": {"dev": self.adb_dev, "msg": self.adb_msg}, "src": self.src, "mode": self.mode,
                     "model": self.model, "padOk": self.pad_ok, "padErr": self.pad_err,
                     "running": self.running}
 
@@ -246,6 +429,13 @@ class H(BaseHTTPRequestHandler):
             ST.model = str(req.get("model"))
             ok2, msg2 = send_model(ST.model)
             ok, msg = (ok and ok2), msg2
+        if req.get("connect") or cmd == "connect":
+            ok, msg = ensure_reverse()
+            if ok and not ST.running:
+                try:
+                    toggle(True)          # 连上就自动开始推手柄，用户无需再点“启动”
+                except Exception:
+                    pass
         if "pred" in req:
             v = int(req.get("pred") or 0)
             ST.pred = 0 if v < 0 else (3 if v > 3 else v)
@@ -291,9 +481,9 @@ def selftest(seconds=4.0):
 
 def send_model(v):
     try:
-        m = _load_pad_module()
-        ok, out = m._adb_run(["shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
-                              "--es", "action", "model", "--ei", "v", str(v)], timeout=12)
+        ok, out = _run_adb(["-s", ST.adb_dev] if ST.adb_dev else [],
+                           ["shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                            "--es", "action", "model", "--ei", "v", str(v)] if False else [], 12)
         return ok, ("型号已同步" if ok else out.strip()[:60])
     except Exception as ex:
         return False, str(ex)
@@ -301,10 +491,9 @@ def send_model(v):
 
 def toggle(start):
     global PAD
-    full = _load_pad_module()
     if start:
         if PAD is None:
-            PAD = full.Pad()
+            PAD = VPad()
             with ST.lock:
                 ST.pad_ok, ST.pad_err = PAD.ok, PAD.err
         full._adb_run(["reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
@@ -326,13 +515,24 @@ LN = None
 
 def start_link():
     global LN
-    m = _load_pad_module()
-    LN = m.Link(on_frame, on_state)
+    LN = Link(on_frame, on_state)
     LN.start()
+
+
+def _auto_connect():
+    """后台线程：每 5 秒尝试一次 adb 反向 + 拉起遥控器推流，连上就慢速巡检。"""
+    time.sleep(1.0)
+    while True:
+        try:
+            ok, _ = ensure_reverse()
+            time.sleep(5.0 if ok else 3.0)
+        except Exception:
+            time.sleep(5.0)
 
 
 def main():
     start_link()
+    threading.Thread(target=_auto_connect, daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT_HTTP), H)
     print("UI: http://127.0.0.1:%d/" % PORT_HTTP)
     srv.serve_forever()

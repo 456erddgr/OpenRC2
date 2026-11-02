@@ -144,6 +144,7 @@
   <footer>
     <button class="btn primary" id="btnRun">启动</button>
     <button class="btn" id="btnSelf">自检</button>
+    <button class="btn" id="btnConn">连接遥控器</button>
     <button class="btn" id="btnJoy">joy.cpl</button>
     <div class="status" id="status">就绪</div>
     <div class="metrics">
@@ -211,6 +212,7 @@ $("btnRun").addEventListener("click", async () => {
   if (r && r.ok){ running = !running; paintRun(); }
   else if (r) $("status").textContent = r.err || "启动失败";
 });
+$("btnConn").addEventListener("click", () => { $("status").textContent = "正在建 adb 反向…"; cmd({connect: true}); });
 $("btnSelf").addEventListener("click", () => { $("status").textContent = "正在扫杆…"; cmd({selftest: true}); });
 $("btnJoy").addEventListener("click", () => cmd({joycpl: true}));
 
@@ -243,7 +245,9 @@ function paintState(s){
     $("predHint").textContent = HINTS[pred];
   }
   if (s.running !== running){ running = s.running; paintRun(); }
-  if (s.padErr) $("status").textContent = s.padErr;
+  const adb = s.adb || {};
+  if (!s.connected && adb.msg) $("status").textContent = adb.msg + " · 等待推流";
+  else if (s.padErr) $("status").textContent = s.padErr;
   else if (s.src) $("status").textContent = s.src;
 }
 
