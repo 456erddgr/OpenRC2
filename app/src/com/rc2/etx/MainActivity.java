@@ -53,9 +53,29 @@ public class MainActivity extends Activity implements Host {
         }
     };
 
+    /** 把任何未捕获的 Java 异常写进 files/crash_java.txt，方便用户复现「点一下就闪退」后取证。 */
+    private void installCrashLogger() {
+        final Thread.UncaughtExceptionHandler prev = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override public void uncaughtException(Thread t, Throwable e) {
+                try {
+                    java.io.File f = new java.io.File(getFilesDir(), "crash_java.txt");
+                    java.io.PrintWriter w = new java.io.PrintWriter(
+                            new java.io.FileWriter(f, true), true);
+                    w.println("=== " + System.currentTimeMillis() + " thread=" + t.getName());
+                    e.printStackTrace(w);
+                    w.close();
+                    Log.e("ETX-Main", "crash logged", e);
+                } catch (Throwable ignored) { }
+                if (prev != null) prev.uncaughtException(t, e);
+            }
+        });
+    }
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        installCrashLogger();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         radio = Radio.get(this);
         radio.start();
