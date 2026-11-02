@@ -83,6 +83,15 @@ public final class EtxNative {
   // 0 down / 1 move / 2 up
 
     // ---- 输出 ----
+    // ---- 声音（EdgeTX 警告音/提示音）----
+    /** 原生侧要发声：freq 频率(Hz)，len 时长(ms)，pause 之后静音(ms)。 */
+    public static native boolean audioTone(int freq, int len, int pause);
+
+    /** 原生→Java：送一块 PCM（S16 单声道 32000Hz，一块 320 样本）。 */
+    public static void pcm(short[] data, int count) {
+        com.rc2.etx.audio.EtxAudio.write(data, count);
+    }
+
     public static native int channelsUs(int[] out16);  // 返回写了几路
     public static native int render(int[] argb, int w, int h);  // 1 = 画面变了
 

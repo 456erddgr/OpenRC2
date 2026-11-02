@@ -177,20 +177,10 @@ public final class DumlStick {
                     //   客户端 → 服务端： 01 01 08 0a | B | B-Δ      ← 必须回显服务端那一对，且整体滞后一格
                     // 大疆模拟器（真客户端）就是这么做的；我们自己编一个本地计时器发过去，
                     // 服务端判定时钟不同源 → 24 秒左右把连接 reset 掉（这就是"老是断连"）。
-                    long nowMs = System.currentTimeMillis();
-                    if (nowMs - lastHb >= 30) {
-                        lastHb = nowMs;
-                        byte[] hb = nextHeartbeat();
-                        if (hb != null) {
-                            try {
-                                out.write(hb);
-                                out.flush();
-                            } catch (Throwable werr) {
-                                Log.w(TAG, "heartbeat failed: " + werr);
-                                break;
-                            }
-                        }
-                    }
+                    // 不发任何上行字节。
+                    // re/04-速率上限与槽位结论.md 实测：40007 是纯下行推送（9~10Hz），
+                    // app→RC 方向外层魔数是 55 CC 49 57 + DUML，我们没有正确报文可发；
+                    // 以前每 30ms 发的 01 01 08 0a 属非法帧 → 对端提前 RST，且把客户端槽位卡死。
                     if (n == 0 && buf != null && have == 0) {
                         continue;              // 只是这 30ms 没数据
                     }
@@ -228,7 +218,12 @@ public final class DumlStick {
             if (failStreak == 1 && frames > 0 && (System.currentTimeMillis() - lastFrameMs) < 1500) {
                 snapMode = true;
             }
-            long wait = snapMode ? 10L : Math.min(1000L << Math.min(failStreak, 3), 8000L);
+            // 槽位回收要 5s：连不上时按 5s/5s/10s/20s/30s 退避（上限 30s）。
+            // 原来 10ms 的快照模式会让"秒关"变成死循环，等于拿不到任何数据。
+            long wait;
+            if (snapMode && frames > 0) wait = 5000L;
+            else if (failStreak <= 2) wait = 5000L;
+            else wait = Math.min(5000L << Math.min(failStreak - 2, 3), 30000L);
             try {
                 Thread.sleep(wait);
             } catch (InterruptedException ignore) {
@@ -249,19 +244,31 @@ public final class DumlStick {
                 i += 12;
                 continue;
             }
-            if ((b[i] & 0xFF) != 0x55 || (b[i + 1] & 0xFF) != 0xCC) {
+            if ((b[i] & 0xFF) != 0x55) {
                 i++;
                 continue;
             }
-            int plen = (b[i + 4] & 0xFF) | ((b[i + 5] & 0xFF) << 8)
-                    | ((b[i + 6] & 0xFF) << 16) | ((b[i + 7] & 0xFF) << 24);
-            if (plen <= 0 || plen > 2048) {
-                i++;
-                continue;
+            // 流里混着两种形态：①带 hp 头 55 CC 30 75 + u32le LEN + DUML
+            //                    ②裸 DUML：55 + LEN(10bit) + ver + crc8 ...
+            boolean hasHp = (len - i >= 4)
+                    && (b[i + 1] & 0xFF) == 0xCC && (b[i + 2] & 0xFF) == 0x30
+                    && (b[i + 3] & 0xFF) == 0x75;
+            if (hasHp) {
+                if (len - i < 8) break;
+                int plen = (b[i + 4] & 0xFF) | ((b[i + 5] & 0xFF) << 8)
+                        | ((b[i + 6] & 0xFF) << 16) | ((b[i + 7] & 0xFF) << 24);
+                if (plen < 4 || plen > 2048) { i++; continue; }
+                if (len - i - 8 < plen) break;      // 还没收全
+                handleFrame(b, i + 8, plen);
+                i += 8 + plen;
+            } else {
+                if (len - i < 4) break;
+                int dlen = (b[i + 1] & 0xFF) | (((b[i + 2] & 0xFF) & 0x03) << 8);
+                if (dlen < 4 || dlen > 2048) { i++; continue; }
+                if (len - i < dlen) break;          // 还没收全
+                handleFrame(b, i, dlen);
+                i += dlen;
             }
-            if (len - i - 8 < plen) break;      // 还没收全
-            handleFrame(b, i + 8, plen);
-            i += 8 + plen;
         }
         int rest = len - i;
         if (rest > 0) System.arraycopy(b, i, b, 0, rest);
@@ -311,7 +318,7 @@ public final class DumlStick {
             return;
         }
         boolean isStick = (cmdSet == 0x06 && cmdId == 0xAE);
-        if (isStick && len >= 28) {
+        if (isStick && len == 30) {      // duml-re: 1216/1216 摇杆帧恒为 len=30
             int p = off + 16;
             int[] next = new int[AXES];
             for (int k = 0; k < AXES; k++) {
@@ -346,6 +353,7 @@ public final class DumlStick {
             hzFrom = now;
             hzCount = 0;
             stickHzCount = 0;
+            Log.i(TAG, "stat hz=" + hz + " stickHz=" + stickHz + " stick=" + stickFrames + " frames=" + frames + " bad=" + badFrames + " gap150=" + gapOver150);
         }
     }
 

@@ -569,6 +569,27 @@ public class MainActivity extends Activity implements Host {
             boolean on = i.getIntExtra("on", 1) != 0;
             radio.setPadStreamOn(on);
             toast("虚拟手柄数据流 " + (on ? "已开（PC 端 adb reverse + ViGEm）" : "已关"));
+        } else if ("audio".equals(act)) {
+            // 自测：--es action audio [--ei freq 440 --ei len 200]
+            int fq = i.getIntExtra("freq", 440), ln = i.getIntExtra("len", 200);
+            boolean ok = false;
+            try { ok = com.rc2.etx.jni.EtxNative.audioTone(fq, ln, 0); } catch (Throwable t) {
+                Log.e(TAG, "audioTone 异常: " + t);
+            }
+            Log.i(TAG, "intent action=audio freq=" + fq + " len=" + ln + " rc=" + (ok ? 1 : 0));
+            if (!ok) {
+                // 原生 JNI 入口还没接上时，用 Java 侧方波自证音频通路（AudioTrack 32k/单声道）
+                int n = 32000 * ln / 1000;
+                short[] pcm = new short[n];
+                for (int k = 0; k < n; k++) {
+                    double ph = (k * (double) fq / 32000.0) % 1.0;
+                    pcm[k] = (short) (ph < 0.5 ? 9000 : -9000);
+                }
+                for (int k = 0; k < n; k += 320)
+                    com.rc2.etx.audio.EtxAudio.write(java.util.Arrays.copyOfRange(pcm, k, Math.min(n, k + 320)), Math.min(320, n - k));
+                Log.i(TAG, "Java 兜底方波已写入 " + n + " 样本");
+            }
+            toast("测试音 " + fq + "Hz rc=" + (ok ? 1 : 0));
         } else if ("model".equals(act)) {
             // 遥控器型号：--es action model --ei v 0(自动)/1(RC2)/2(RC Pro)
             int mv = i.getIntExtra("v", 0);
