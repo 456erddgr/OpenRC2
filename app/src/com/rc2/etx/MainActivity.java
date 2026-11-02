@@ -130,6 +130,12 @@ public class MainActivity extends Activity implements Host {
     }
 
     @Override
+    protected void onPause() {
+        // 用户切走/按 Home 时也要落盘，否则“系统设置改了又回去”就丢了
+        if (view != null) view.flushNativeSettings();
+        super.onPause();
+    }
+
     protected void onDestroy() {
         try { if (usbStateRx != null) unregisterReceiver(usbStateRx); } catch (Throwable ignore) { }
         try {

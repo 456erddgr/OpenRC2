@@ -136,7 +136,11 @@ public final class Radio {
 
         // 开关文件存在就自启虚拟手柄数据流（PC 侧 ViGEm 方案，不依赖 root）
         try {
-            if (com.rc2.etx.usb.PadStream.flagFile(ctx).exists()) padStream.start(ctx);
+            // 默认常开：以前只在“开关文件存在”时才启动，而没人写过这个文件，
+            // 于是每次重启都要手动开一次（用户报的“一重启就不好使”）。
+            boolean wantPad = com.rc2.etx.usb.PadStream.flagFile(ctx).exists();
+            java.io.File offF = new java.io.File(com.rc2.etx.usb.PadStream.flagFile(ctx).getParentFile(), "padbridge.off");
+            if (wantPad || !offF.exists()) padStream.start(ctx);
         } catch (Throwable ignore) { }
         if (dumlOn) {
             start();

@@ -30,6 +30,7 @@ public class PadStream {
     private volatile long frames = 0;
     private volatile String lastErr = "-";
     private Thread th;
+    private android.content.Context lastCtx;
     private Socket sock;
     private BufferedWriter out;
 
@@ -45,8 +46,17 @@ public class PadStream {
 
     public synchronized void start(Context c) {
         want = true;
+        // 落盘开关文件：不写的话重启后没人再把它拉起来，用户看到的就是
+        // “一重启就不好使”（他报的那个）。
+        try {
+            File f = flagFile(c.getApplicationContext());
+            if (!f.exists()) { f.getParentFile().mkdirs(); f.createNewFile(); }
+        } catch (Throwable t) {
+            lastErr = "flag: " + t;
+        }
         if (th != null && th.isAlive()) return;
         final Context ctx = c.getApplicationContext();
+        lastCtx = ctx;
         th = new Thread(new Runnable() {
             public void run() { loop(ctx); }
         }, "etx-padstream");
@@ -56,6 +66,8 @@ public class PadStream {
 
     public synchronized void stop() {
         want = false;
+        try { flagFile(lastCtx).delete(); } catch (Throwable ignore) { }
+        lastCtx = null;
         closeQuietly();
     }
 

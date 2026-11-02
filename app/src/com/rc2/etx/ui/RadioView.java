@@ -126,6 +126,13 @@ public final class RadioView extends View {
         setPage(6);
     }
 
+    /** 供 Activity 在 onPause 调用：把 EdgeTX 设置刷盘。 */
+    public void flushNativeSettings() {
+        for (Panel pn : panels) {
+            if (pn instanceof NativePanel) { ((NativePanel) pn).flushSettings(); return; }
+        }
+    }
+
     public void setPage(int p) {
         if (p >= 0 && p < panels.length) page = p;
         invalidate();

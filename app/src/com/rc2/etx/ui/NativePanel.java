@@ -110,6 +110,20 @@ public class NativePanel extends Panel {
     }
 
 
+    /** 把 EdgeTX 的当前设置写回 radio.yml（3 次 RTN + 跑帧，让 EdgeTX 自己落盘）。 */
+    public void flushSettings() {
+        try {
+            for (int i = 0; i < 3; i++) {
+                queueKey(5);
+                tick();
+                Thread.sleep(40);
+            }
+            android.util.Log.i("ETX-Flush", "settings flushed to radio.yml");
+        } catch (Throwable t) {
+            android.util.Log.w("ETX-Flush", "flush failed: " + t);
+        }
+    }
+
     /** 强制重启原生核心：退出 Lua 报错页、或界面卡死时的兜底入口。 */
     public void restartCore() {
         // 先把设置刷盘：EdgeTX 是在“离开页面/按 RTN”时写 radio.yml 的，
