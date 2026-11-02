@@ -77,7 +77,14 @@ public final class RadioView extends View {
             final SetPage sp = (SetPage) panels[6];
             sp.setOnCard(new SetPage.OnCard() {
                 public void onCard(int idx) {
-                    if (idx == SetPage.C_MODEL) {
+                    if (idx == SetPage.C_PAD) {
+                        boolean on = !r.isPadStreamOn();
+                        r.setPadStreamOn(on);
+                        sp.setValue(SetPage.C_PAD, on ? "开" : "关");
+                        if (host != null) host.toast(on
+                                ? "电脑虚拟手柄已开：电脑端点「启动」即可（无需 root）"
+                                : "电脑虚拟手柄已关");
+                    } else if (idx == SetPage.C_MODEL) {
                         int m = (com.rc2.etx.radio.Store.loadModel(getContext()) + 1) % 3;
                         com.rc2.etx.radio.Store.saveModel(getContext(), m);
                         sp.setValue(SetPage.C_MODEL, com.rc2.etx.radio.Store.modelName(m));
@@ -102,6 +109,7 @@ public final class RadioView extends View {
             });
             sp.setValue(SetPage.C_MODEL, com.rc2.etx.radio.Store.modelName(
                     com.rc2.etx.radio.Store.loadModel(getContext())));
+            sp.setValue(SetPage.C_PAD, r.isPadStreamOn() ? "开" : "关");
         }
         if (panels.length > IDX_NATIVE && panels[IDX_NATIVE] instanceof NativePanel) {
             nativePanelRef = (NativePanel) panels[IDX_NATIVE];
