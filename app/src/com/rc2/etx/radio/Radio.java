@@ -204,12 +204,29 @@ public final class Radio {
             // The DJI MCU frame is in a different order (rawSnap[0]=RH, [1]=RV,
             // [2]=LV, [3]=LH), so both the permutation and the normalisation are
             // needed here.
-            axes7[0] = djiToEtxAdc(rawSnap[3]); // LH
-            axes7[1] = djiToEtxAdc(rawSnap[2]); // LV
-            axes7[2] = djiToEtxAdc(rawSnap[1]); // RV
-            axes7[3] = djiToEtxAdc(rawSnap[0]); // RH
-            axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
-            axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
+            // 2026-11-02：插帧必须喂进原生核心，否则 EdgeTX 内部拿到的是 10Hz 台阶，
+            // 表现为「动几下卡一下、插帧像没生效」。这里优先用 StickSmooth 的插值输出，
+            // 只有插帧关闭（capMs<=0）或还没采满三帧时才回落到原始 10Hz 快照。
+            boolean smoothed = false;
+            long nowMs = android.os.SystemClock.uptimeMillis();
+            if (!suppressLiveInput && smooth.value(nowMs, sv)) {
+                // axes7 顺序 LH,LV,RV,RH,P1,P2,P3；sv 顺序 lx(RUD),ly(THR),rx(AIL),ry(ELE),k1,k2
+                axes7[0] = svToAdc(sv[0]); // LH 偏航
+                axes7[1] = svToAdc(sv[1]); // LV 油门
+                axes7[2] = svToAdc(sv[3]); // RV 俯仰
+                axes7[3] = svToAdc(sv[2]); // RH 副翼
+                axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
+                axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
+                smoothed = true;
+            }
+            if (!smoothed) {
+                axes7[0] = djiToEtxAdc(rawSnap[3]); // LH
+                axes7[1] = djiToEtxAdc(rawSnap[2]); // LV
+                axes7[2] = djiToEtxAdc(rawSnap[1]); // RV
+                axes7[3] = djiToEtxAdc(rawSnap[0]); // RH
+                axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
+                axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
+            }
             axes7[6] = 1024;                    // P3（无硬件）
             applyRcProButtons(axes7);
         } else {
@@ -272,6 +289,15 @@ public final class Radio {
     /** 中位死区（DJI 原始 ADC 单位，约 2% 行程）：静止时把零漂直接吸到中点，
      *  否则通道会在 965~992us 之间来回飘（用户说的"漂移"）。 */
     private static final int DJI_CENTER_DEAD = 4;
+
+    /**
+     * StickSmooth 输出（-1..1）直接换算成核心 ADC（0..2048，中点 1024）。
+     * 注意：这里**不能**再走 djiToEtxAdc()，因为那条路径带 DJI_CENTER_DEAD 死区，
+     * 插值曲线穿过中点时会被硬吸附到 1024，表现就是用户说的「动几下就卡一下」。
+     */
+    private int svToAdc(float v) {
+        return synthAdc(v);
+    }
 
     private int djiToEtxAdc(int djiRaw) {
         if (Math.abs(djiRaw - 1024) <= DJI_CENTER_DEAD) return 1024;

@@ -64,17 +64,35 @@ def adb_devices():
     return devs, ""
 
 
-def ensure_reverse(verbose=False):
-    """建 adb 反向端口并把遥控器端的推流打开。返回 (ok, msg)。"""
+def _reverse_present(dev):
+    """adbd 的 reverse 表里已经有 9999 了吗（幂等检查，避免每轮重建把连接踢断）。"""
+    want = "tcp:%d tcp:%d" % (PORT_LINK, PORT_LINK)
+    rc, out, err = _run_adb(["-s", dev, "reverse", "--list"])
+    if rc != 0:
+        return False
+    return want in (out or "")
+
+
+def ensure_reverse(verbose=False, force=False):
+    """建 adb 反向端口并把遥控器端的推流打开。返回 (ok, msg)。
+
+    2026-11-02：原来每 5 秒无条件 `adb reverse` + `am start` 一次，
+    每轮都会拆掉已有转发并把 App 重新拉到前台 —— 用户看到的就是
+    「手柄连电脑几秒断一下、几秒断一下」。改成：端口已在就绝不动它，
+    推流已开就绝不重复拉起 App。
+    """
     devs, err = adb_devices()
     if not devs:
         return False, "没找到已连接的遥控器（" + (err or "请插 USB 或开无线调试") + "）"
     dev = devs[0]
-    rc, out, err = _run_adb(["-s", dev, "reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
-    if rc != 0:
-        return False, "adb reverse 失败：" + (err or out or "未知错误")[:80]
-    _run_adb(["-s", dev, "shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
-              "--es", "action", "pad", "--ei", "on", "1"])
+    if force or not _reverse_present(dev):
+        rc, out, err = _run_adb(["-s", dev, "reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
+        if rc != 0 and "already" not in (err or "").lower() and "already" not in (out or "").lower():
+            return False, "adb reverse 失败：" + (err or out or "未知错误")[:80]
+    if not ST.pad_on:
+        _run_adb(["-s", dev, "shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
+                  "--es", "action", "pad", "--ei", "on", "1"])
+        ST.pad_on = True
     ST.adb_dev = dev
     ST.adb_msg = "已连接 " + dev
     return True, ST.adb_msg
@@ -93,6 +111,7 @@ class Link(threading.Thread):
         self.stop_flag = False
         self.frames = 0
         self.connected = False
+        self.last_frame_at = 0.0
         self.latest = [1024] * 6
 
     def run(self):
@@ -134,6 +153,7 @@ class Link(threading.Thread):
                         ax = f.get("ax") or [1024] * 6
                         self.latest = ax
                         self.frames += 1
+                        self.last_frame_at = time.time()
                         self.on_frame(ax)
             except Exception:
                 pass
@@ -217,6 +237,7 @@ class State(object):
         self.pad_ok = False
         self.pad_err = ""
         self.running = False
+        self.pad_on = False
         self.t0 = time.time()
         self.n0 = 0
         # 三点历史 + 估计量（预测插值用）
@@ -496,9 +517,17 @@ def toggle(start):
             PAD = VPad()
             with ST.lock:
                 ST.pad_ok, ST.pad_err = PAD.ok, PAD.err
-        full._adb_run(["reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
+        # 只在缺端口时补，避免每次「启动」都把转发重建一遍（会踢断正在跑的连接）
+        try:
+            devs, _e = adb_devices()
+            need = True if not devs else (not _reverse_present(devs[0]))
+        except Exception:
+            need = True
+        if need:
+            full._adb_run(["reverse", "tcp:%d" % PORT_LINK, "tcp:%d" % PORT_LINK])
         full._adb_run(["shell", "am", "start", "-n", "com.rc2.etx/.MainActivity",
                        "--es", "action", "pad", "--ei", "on", "1"], timeout=15)
+        ST.pad_on = True
         if LN is None:
             start_link()
         with ST.lock:
@@ -507,6 +536,7 @@ def toggle(start):
     with ST.lock:
         ST.running = False
     full._adb_run(["reverse", "--remove", "tcp:%d" % PORT_LINK])
+    ST.pad_on = False
     return True, "已停止"
 
 
@@ -519,13 +549,22 @@ def start_link():
     LN.start()
 
 
+def _link_healthy():
+    if LN is None or not LN.connected:
+        return False
+    return (time.time() - LN.last_frame_at) < 2.0
+
+
 def _auto_connect():
-    """后台线程：每 5 秒尝试一次 adb 反向 + 拉起遥控器推流，连上就慢速巡检。"""
+    """后台线程：只在链路真的断了才去修 adb 反向，健康时绝不打扰（否则每 5 秒踢一次连接）。"""
     time.sleep(1.0)
     while True:
         try:
+            if _link_healthy():
+                time.sleep(10.0)
+                continue
             ok, _ = ensure_reverse()
-            time.sleep(5.0 if ok else 3.0)
+            time.sleep(3.0 if not ok else 1.5)
         except Exception:
             time.sleep(5.0)
 
