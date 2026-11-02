@@ -1,144 +1,267 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<title>OpenRC2</title>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenRC2 虚拟手柄</title>
 <style>
-:root{
-  --ink:#070a0e; --card:rgba(22,27,34,.52); --stroke:rgba(255,255,255,.12);
-  --txt:#f2f5f8; --sub:#9aa4af; --amber:#f5b942; --teal:#2dd4bf; --blue:#60a5fa;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{
-  font:14px/1.45 "SF Pro Display","Segoe UI Variable Display","Microsoft YaHei UI",system-ui;
-  color:var(--txt); background:#0a0d12; overflow:hidden;
-}
-#wall{position:fixed;inset:-40px;background-size:cover;background-position:center;
-  filter:blur(26px) saturate(130%) brightness(.55); transform:scale(1.1); z-index:0}
-#veil{position:fixed;inset:0;background:radial-gradient(120% 80% at 20% 0%,rgba(96,165,250,.16),transparent 60%),
-  radial-gradient(90% 70% at 90% 20%,rgba(244,114,182,.12),transparent 60%),rgba(6,9,14,.45);z-index:1}
-.app{position:relative;z-index:2;height:100%;padding:18px;display:grid;gap:14px;
-  grid-template-columns:minmax(300px,26%) 1fr;grid-template-rows:auto 1fr}
-.head{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:14px 18px;
-  background:var(--card);border:1px solid var(--stroke);border-radius:22px;
-  backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);
-  box-shadow:0 20px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.16)}
-.brand{font-size:24px;font-weight:800;letter-spacing:.2px}
-.brand span{font-weight:500;color:var(--sub);font-size:13px;margin-left:10px}
-.spacer{flex:1}
-.pill{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;
-  border:1px solid var(--stroke);background:rgba(255,255,255,.06);font-size:13px}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--amber);transition:background .2s}
-.dot.on{background:var(--teal);box-shadow:0 0 12px var(--teal)}
-.card{padding:16px 18px;border-radius:24px;background:var(--card);border:1px solid var(--stroke);
-  backdrop-filter:blur(34px) saturate(170%); -webkit-backdrop-filter:blur(34px) saturate(170%);
-  box-shadow:0 24px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.15);
-  display:flex;flex-direction:column;gap:14px;min-height:0}
-h3{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--sub);text-transform:uppercase}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.seg{display:flex;gap:6px;padding:4px;border-radius:14px;background:rgba(255,255,255,.05);
-  border:1px solid var(--stroke)}
-.seg button{flex:1;padding:9px 12px;border:0;border-radius:11px;background:transparent;color:var(--txt);
-  font:inherit;font-weight:600;cursor:pointer;transition:transform .12s cubic-bezier(.2,.9,.2,1),background .18s,color .18s}
-.seg button:hover{background:rgba(255,255,255,.09)}
-.seg button:active{transform:scale(.96)}
-.seg button.on{background:var(--teal);color:#06231b;box-shadow:0 6px 20px rgba(45,212,191,.35)}
-.bars{display:flex;flex-direction:column;gap:12px;min-height:0}
-.bar{display:grid;grid-template-columns:104px 1fr 52px;align-items:center;gap:12px}
-.bar b{font-weight:600;color:var(--sub);font-size:12.5px}
-.track{height:12px;border-radius:999px;background:rgba(255,255,255,.09);overflow:hidden;
-  position:relative;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
-.fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,#2dd4bf,#60a5fa);
-  transition:width .05s linear, background .3s; will-change:width}
-.fill.mid{background:linear-gradient(90deg,#f5b942,#f97316)}
-.val{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
-.btns{display:flex;flex-direction:column;gap:10px;margin-top:auto}
-.btn{padding:13px;border-radius:16px;border:1px solid var(--stroke);background:rgba(255,255,255,.07);
-  color:var(--txt);font:inherit;font-weight:700;cursor:pointer;
-  transition:transform .12s cubic-bezier(.2,.9,.2,1),background .18s,box-shadow .18s}
-.btn:hover{background:rgba(255,255,255,.13)}
-.btn:active{transform:scale(.97)}
-.btn.primary{background:linear-gradient(180deg,#ffd479,#f5b942);color:#241a04;border-color:transparent;
-  box-shadow:0 12px 30px rgba(245,185,66,.35)}
-.btn.primary.running{background:linear-gradient(180deg,#ff9b9b,#ef4444);color:#2b0505;box-shadow:0 12px 30px rgba(239,68,68,.3)}
-.foot{grid-column:1/-1;display:flex;gap:12px;align-items:center;color:var(--sub);font-size:12px;padding:0 6px}
-.log{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mono{font-variant-numeric:tabular-nums}
-@media (max-width:900px){.app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}}
+  :root{
+    --bg:#070b12; --panel:rgba(24,32,44,.62); --line:rgba(255,255,255,.10);
+    --tx:#eaf1f8; --dim:#8b9bb0; --teal:#2dd4bf; --amber:#f5b942; --red:#ff6b6b;
+    --sh:0 22px 60px rgba(0,0,0,.62);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    padding:16px; color:var(--tx);
+    font:14px/1.45 "Micr0soft YaHei UI","Microsoft YaHei UI","Segoe UI",system-ui,sans-serif;
+    background:#05080d; display:flex; flex-direction:column; min-height:100%; overflow:hidden;
+  }
+  #wall{position:fixed;inset:-40px;background-image:url(/bg);background-size:cover;background-position:center;z-index:0;
+        filter:blur(16px) saturate(150%) brightness(.72);transform:scale(1.1)}
+  #veil{position:fixed;inset:0;z-index:1;
+        background:radial-gradient(110% 80% at 15% 0%,rgba(45,212,191,.14),transparent 62%),
+                   radial-gradient(90% 70% at 92% 8%,rgba(245,185,66,.12),transparent 60%),
+                   linear-gradient(170deg,rgba(6,10,16,.42),rgba(6,10,16,.80))}
+  .wrap{position:relative;z-index:2;flex:1;display:flex;flex-direction:column;gap:13px;min-height:0}
+
+  header,footer,section.card{
+    background:linear-gradient(180deg,rgba(32,42,56,.66),rgba(18,26,36,.72));
+    border:1px solid rgba(255,255,255,.11);border-radius:20px;
+    backdrop-filter:blur(30px) saturate(160%);-webkit-backdrop-filter:blur(30px) saturate(160%);
+    box-shadow:var(--sh),inset 0 1px 0 rgba(255,255,255,.13);
+  }
+  header{display:flex;align-items:center;gap:12px;padding:14px 18px;flex:none}
+  .brand{font-size:21px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+  .brand span{font-size:12px;font-weight:400;color:var(--dim);margin-left:9px;letter-spacing:0}
+  .spacer{flex:1}
+  .chip{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border-radius:999px;
+        background:rgba(255,255,255,.06);border:1px solid var(--line);font-size:12.5px;color:var(--dim);white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);transition:background .2s}
+  .dot.on{background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .dot.warn{background:var(--amber);box-shadow:0 0 10px var(--amber)}
+  .hero{display:flex;align-items:baseline;gap:5px;padding:4px 16px;border-radius:14px;
+        background:linear-gradient(180deg,rgba(45,212,191,.16),rgba(45,212,191,.05));
+        border:1px solid rgba(45,212,191,.30);box-shadow:inset 0 1px 0 rgba(255,255,255,.14)}
+  .heroNum{font-size:26px;font-weight:750;letter-spacing:-.5px;color:var(--teal);
+           font-variant-numeric:tabular-nums;min-width:46px;text-align:right;line-height:1}
+  .heroUnit{font-size:11px;color:var(--dim)}
+
+  main{flex:1;display:grid;grid-template-columns:minmax(296px,336px) minmax(0,1fr);gap:13px;min-height:0}
+  section.card{padding:18px;display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
+  h2{font-size:12px;font-weight:600;color:var(--dim);letter-spacing:1.2px;text-transform:none}
+  .group{display:flex;flex-direction:column;gap:8px}
+  .hint{font-size:11.5px;color:var(--dim)}
+
+  /* 分段选择器：纯 flex 等分，没有任何绝对定位 */
+  .seg{display:flex;gap:7px}
+  .seg button{flex:1 1 0;min-width:0;padding:11px 4px;border-radius:12px;cursor:pointer;
+    background:rgba(255,255,255,.05);border:1px solid var(--line);color:var(--tx);
+    font:600 13px/1 "Microsoft YaHei UI",sans-serif;transition:background .14s,color .14s,transform .06s;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .seg button:hover{background:rgba(255,255,255,.11)}
+  .seg button:active{transform:scale(.97)}
+  .seg button.on{background:var(--teal);border-color:transparent;color:#04211c}
+
+  .slide{display:grid;grid-template-columns:1fr 52px;gap:10px;align-items:center}
+  input[type=range]{width:100%;accent-color:var(--teal)}
+  .val{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim);font-size:12px}
+
+  /* 六条通道：grid 固定列宽，行等分，文字不会被挤到别的行 */
+  .bars{display:grid;grid-template-rows:repeat(6,1fr);gap:8px;min-height:0;flex:1}
+  .bar{display:grid;grid-template-columns:112px minmax(80px,1fr) 58px;gap:12px;align-items:center;min-height:30px}
+  .bar .name{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .track{position:relative;height:12px;border-radius:999px;overflow:hidden;
+         background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.04));
+         box-shadow:inset 0 1px 2px rgba(0,0,0,.45)}
+  .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)}
+  .fill{position:absolute;top:0;bottom:0;left:50%;width:0;border-radius:999px;box-shadow:0 0 12px rgba(45,212,191,.5);
+        background:var(--teal);transition:left .04s linear,width .04s linear,background .2s}
+  .bar .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;
+           padding:3px 7px;border-radius:8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08)}
+
+  footer{display:flex;align-items:center;gap:11px;padding:13px 18px;flex:none;flex-wrap:wrap}
+  .btn{padding:11px 24px;border-radius:13px;border:1px solid var(--line);cursor:pointer;
+       background:rgba(255,255,255,.06);color:var(--tx);font:600 14px/1 "Microsoft YaHei UI",sans-serif;
+       transition:background .14s,transform .06s}
+  .btn:hover{background:rgba(255,255,255,.13)}
+  .btn:active{transform:scale(.98)}
+  .btn.primary{background:linear-gradient(180deg,#ffcd6b,#f0a821);border-color:transparent;color:#231703;min-width:132px;
+       box-shadow:0 8px 22px rgba(240,168,33,.28)}
+  .btn.primary.stop{background:var(--red);color:#2a0a0a}
+  .status{color:var(--dim);font-size:12.5px;min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .metrics{display:flex;gap:8px}
 </style>
+</head>
+<body>
 <div id="wall"></div><div id="veil"></div>
-<div class="app">
-  <div class="head">
+
+<div class="wrap">
+  <header>
     <div class="brand">OpenRC2<span>虚拟手柄 · PC 端</span></div>
     <div class="spacer"></div>
-    <div class="pill"><i class="dot" id="dot"></i><span id="st">等待遥控器</span></div>
-    <div class="pill mono"><span id="fps">0</span> fps · <span id="fr">0</span> 帧</div>
-  </div>
+    <div class="chip"><i class="dot" id="dot"></i><span id="conn">等待中</span></div>
+    <div class="hero"><div class="heroNum" id="lag">—</div><div class="heroUnit">ms 延迟</div></div>
+  </header>
 
-  <div class="card">
-    <h3>手柄类型</h3>
-    <div class="seg" id="mode">
-      <button data-v="xbox" class="on">Xbox 360</button>
-      <button data-v="fvp">FVP 手感</button>
-    </div>
-    <h3>遥控器型号</h3>
-    <div class="seg" id="model">
-      <button data-v="0" class="on">自动</button>
-      <button data-v="1">RC2</button>
-      <button data-v="2">RC Pro</button>
-    </div>
-    <div class="btns">
-      <button class="btn primary" id="run">启 动</button>
-      <button class="btn" id="selftest">自检摇杆</button>
-      <button class="btn" id="joy">joy.cpl</button>
-    </div>
-  </div>
+  <main>
+    <section class="card">
+      <h2>手柄类型</h2>
+      <div class="seg" id="segMode">
+        <button data-v="xbox" class="on">Xbox 360</button>
+        <button data-v="fvp">FVP 手感</button>
+      </div>
 
-  <div class="card">
-    <h3>摇杆实时数据（60fps · SSE）</h3>
-    <div class="bars" id="bars"></div>
-  </div>
+      <h2>遥控器型号</h2>
+      <div class="seg" id="segModel">
+        <button data-v="0" class="on">自动</button>
+        <button data-v="1">RC2</button>
+        <button data-v="2">RC Pro</button>
+      </div>
 
-  <div class="foot"><span class="log" id="log">就绪</span><span class="mono" id="lat"></span></div>
+      <h2>延迟优化</h2>
+      <div class="seg" id="segPred">
+        <button data-v="0">关</button>
+        <button data-v="1">弱</button>
+        <button data-v="2" class="on">中</button>
+        <button data-v="3">强</button>
+      </div>
+      <div class="hint" id="predHint">预测 100ms · 反向即停</div>
+
+      <h2>死区 / 曲线</h2>
+      <div class="group">
+        <div class="slide"><input id="dz" type="range" min="0" max="30" value="6"><div class="val" id="dzv">6%</div></div>
+        <div class="slide"><input id="ex" type="range" min="50" max="100" value="100"><div class="val" id="exv">1.00</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>摇杆实时数据</h2>
+      <div class="bars" id="bars"></div>
+    </section>
+  </main>
+
+  <footer>
+    <button class="btn primary" id="btnRun">启动</button>
+    <button class="btn" id="btnSelf">自检</button>
+    <button class="btn" id="btnJoy">joy.cpl</button>
+    <div class="status" id="status">就绪</div>
+    <div class="metrics">
+      <div class="chip"><span id="hz">0 Hz</span></div>
+      <div class="chip"><span id="frames">0 帧</span></div>
+    </div>
+  </footer>
 </div>
-<script>
-const NAMES=["左水平 · 偏航","左竖直 · 油门","右水平 · 副翼","右竖直 · 俯仰","左波轮","右波轮"];
-const bars=[];const host=document.getElementById('bars');
-NAMES.forEach((n,i)=>{
-  const d=document.createElement('div');d.className='bar';
-  d.innerHTML=`<b>${n}</b><div class="track"><div class="fill" id="f${i}"></div></div><div class="val" id="v${i}">1024</div>`;
-  host.appendChild(d);bars.push({f:document.getElementById('f'+i),v:document.getElementById('v'+i),cur:512});
-});
-let mode='xbox',model='0',running=false,last=performance.now(),shown=0;
-function post(cmd,extra){return fetch('/cmd',{method:'POST',headers:{'Content-Type':'application/json'},
-  body:JSON.stringify(Object.assign({cmd},extra||{}))}).then(r=>r.json()).catch(()=>({ok:false,msg:'网络错误'}));}
-document.querySelectorAll('#mode button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('#mode button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
-  mode=b.dataset.v;post('mode',{v:mode});});
-document.querySelectorAll('#model button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('#model button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
-  model=b.dataset.v;post('model',{v:model}).then(r=>{if(!r.ok)log('型号同步失败：'+r.msg);});});
-const runBtn=document.getElementById('run');
-runBtn.onclick=async()=>{const r=await post(running?'stop':'start');log(r.msg);
-  if(r.ok){running=!running;runBtn.textContent=running?'停 止':'启 动';runBtn.classList.toggle('running',running);}};
-document.getElementById('selftest').onclick=()=>post('selftest').then(r=>log(r.msg));
-document.getElementById('joy').onclick=()=>post('joycpl');
-function log(s){document.getElementById('log').textContent=s;}
-const es=new EventSource('/events');
-es.onmessage=e=>{
-  const s=JSON.parse(e.data);shown++;
-  const dot=document.getElementById('dot');
-  dot.classList.toggle('on',!!s.connected);
-  document.getElementById('st').textContent=s.connected?'已连接':'等待中';
-  document.getElementById('fps').textContent=s.fps.toFixed(0);
-  document.getElementById('fr').textContent=s.frames;
-  for(let i=0;i<6;i++){
-    const raw=s.ax[i]??1024, t=Math.max(0,Math.min(1,(raw-364)/1320));
-    bars[i].f.style.width=(t*100).toFixed(1)+'%';
-    bars[i].f.classList.toggle('mid',Math.abs(raw-1024)<55);
-    bars[i].v.textContent=raw;
-  }
-  const now=performance.now(); document.getElementById('lat').textContent=(now-last).toFixed(0)+' ms/帧';
-  last=now;
-};
-fetch('/state').then(r=>r.json()).then(s=>{if(s.running){running=true;runBtn.textContent='停 止';runBtn.classList.add('running');}});
-</script>
 
+<script>
+const NAMES = ["左水平 · 偏航","左竖直 · 油门","右水平 · 副翼","右竖直 · 俯仰","左波轮","右波轮"];
+const barsEl = document.getElementById("bars");
+const barEls = NAMES.map(n => {
+  const row = document.createElement("div"); row.className = "bar";
+  const name = document.createElement("div"); name.className = "name"; name.textContent = n;
+  const track = document.createElement("div"); track.className = "track";
+  const mid = document.createElement("div"); mid.className = "mid";
+  const fill = document.createElement("div"); fill.className = "fill";
+  track.append(mid, fill);
+  const num = document.createElement("div"); num.className = "num"; num.textContent = "1024";
+  row.append(name, track, num);
+  barsEl.append(row);
+  return {fill, num};
+});
+
+const $ = id => document.getElementById(id);
+let running = false, pred = 2;
+
+const HINTS = [
+  "关闭预测：原始数据直推，最稳但更滞后",
+  "预测 50ms：温和，基本不过冲",
+  "预测 100ms：平衡",
+  "预测 160ms：最跟手，快速反向可能略过冲"
+];
+
+function segInit(id, cb){
+  const box = $(id);
+  box.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b || !box.contains(b)) return;
+    [...box.children].forEach(x => x.classList.toggle("on", x === b));
+    cb(b.dataset.v);
+  });
+}
+
+async function cmd(body){
+  try{
+    const r = await fetch("/cmd", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    return await r.json();
+  }catch(err){ $("status").textContent = "核心未启动：" + err.message; return null; }
+}
+
+segInit("segMode",  v => cmd({mode: v}));
+segInit("segModel", v => cmd({model: Number(v)}));
+segInit("segPred",  v => { pred = Number(v); $("predHint").textContent = HINTS[pred]; cmd({pred: pred}); });
+
+$("dz").addEventListener("input", e => {
+  const v = Number(e.target.value); $("dzv").textContent = v + "%"; cmd({deadzone: v});
+});
+$("ex").addEventListener("input", e => {
+  const v = Number(e.target.value) / 100; $("exv").textContent = v.toFixed(2); cmd({expo: v});
+});
+
+$("btnRun").addEventListener("click", async () => {
+  const r = await cmd({start: !running});
+  if (r && r.ok){ running = !running; paintRun(); }
+  else if (r) $("status").textContent = r.err || "启动失败";
+});
+$("btnSelf").addEventListener("click", () => { $("status").textContent = "正在扫杆…"; cmd({selftest: true}); });
+$("btnJoy").addEventListener("click", () => cmd({joycpl: true}));
+
+function paintRun(){
+  const b = $("btnRun");
+  b.textContent = running ? "停止" : "启动";
+  b.classList.toggle("stop", running);
+}
+
+function setBar(i, v){
+  v = Math.max(0, Math.min(2047, Number(v) || 1024));
+  const t = (v - 1024) / 1024;
+  const pct = Math.min(1, Math.abs(t)) * 50;
+  const el = barEls[i];
+  el.fill.style.background = t >= 0 ? "var(--teal)" : "var(--amber)";
+  el.fill.style.left = (t >= 0 ? 50 : 50 - pct) + "%";
+  el.fill.style.width = pct + "%";
+  el.num.textContent = v;
+}
+
+function paintState(s){
+  $("dot").className = "dot " + (s.running ? "on" : (s.connected ? "warn" : ""));
+  $("conn").textContent = s.padOk === false ? "虚拟手柄不可用" : (s.running ? "运行中" : (s.connected ? "已连接" : "等待遥控器"));
+  $("lag").textContent = (s.lagMs >= 0 ? s.lagMs : "—");
+  $("hz").textContent = (s.srcHz || 0).toFixed(1) + " Hz";
+  $("frames").textContent = (s.frames || 0) + " 帧";
+  if (s.pred != null && s.pred !== pred){
+    pred = s.pred;
+    [...$("segPred").children].forEach(b => b.classList.toggle("on", Number(b.dataset.v) === pred));
+    $("predHint").textContent = HINTS[pred];
+  }
+  if (s.running !== running){ running = s.running; paintRun(); }
+  if (s.padErr) $("status").textContent = s.padErr;
+  else if (s.src) $("status").textContent = s.src;
+}
+
+let es = null;
+function connect(){
+  es = new EventSource("/events");
+  es.onmessage = ev => {
+    let s; try { s = JSON.parse(ev.data); } catch(e){ return; }
+    const ax = s.ax || [];
+    for (let i = 0; i < 6; i++) setBar(i, ax[i] != null ? ax[i] : 1024);
+    paintState(s);
+  };
+  es.onerror = () => { try{es.close();}catch(e){} setTimeout(connect, 1200); };
+}
+$("status").textContent = "正在连接核心…";
+connect();
+paintRun();
+$("predHint").textContent = HINTS[2];
+</script>
+</body>
+</html>
