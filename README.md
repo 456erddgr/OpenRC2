@@ -209,7 +209,8 @@ ETX_SO=/path/to/libetx.so ./scripts/build-apk.sh 1.23.0
 
 ## 下载
 
-- GitHub Releases：<https://github.com/456erddgr/OpenRC2/releases>
+- **最新版**：<https://github.com/456erddgr/OpenRC2/releases/tag/1.46.44>（`RC2ETX-1.46.44.apk`，13.2 MB）
+- 全部 Release：<https://github.com/456erddgr/OpenRC2/releases>
 - 国内镜像（123 云盘）：<https://1843626542.share.123pan.cn/123pan/VX07Td-v8SoA?pwd=nRmH>　提取码 `nRmH`
 
 ## 路线图
