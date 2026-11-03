@@ -252,27 +252,57 @@ public class MainActivity extends Activity implements Host {
         // 所以再加两条：①/dev/hidg0 在（说明线接着且已经是手柄模式）②USB 供电属性非 0。
         boolean gadget = false;
         try { gadget = com.rc2.etx.usb.UsbGadget.hasHidNode(); } catch (Throwable ignore) { }
-        boolean powered = false;
-        try { powered = bm != null && bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_STATUS) != 0; } catch (Throwable ignore) { }
-        final boolean plugged = ((bm != null && bm.isCharging()) || powered || gadget)
+        // 2026-11-03 追加：真正可靠的"USB 在位"信号是内核的供电在线标志。
+        // isCharging() 在部分 ROM 上电池自放电时也会误报 true，导致没插线也弹。
+        final boolean vbus = usbVbusOnline();
+        // 2026-11-03 修正（用户报「没连 USB 却一直弹 USB 已连接」）：
+        // 原来这里还有一条 powered = BATTERY_PROPERTY_STATUS != 0 —— 这个属性
+        // 表示的是**电池状态**（放电时也是非 0 的 CHARGING/UNKNOWN 之类），
+        // 跟 USB 有没有插线毫无关系，所以没插线也会被判成 plugged 并弹窗。
+        // 现在只认两件真正可靠的事：①正在充电（外部供电）②HID gadget 节点在
+        // （说明已经切成手柄模式，线肯定是接着的）。
+        // 判定口径（从严到宽）：①VBUS 在线（最可靠）②HID gadget 节点在
+        // ③充电中 **且** 设备树里能读到 usb 供电节点。三者任一即可。
+        final boolean charging = bm != null && bm.isCharging() && vbus;
+        final boolean plugged = (vbus || gadget || charging)
                 && getIntent() != null && getIntent().getStringExtra("action") == null;
-        if (plugged) {
-            usbConnected = 1;
-            new android.os.Handler(getMainLooper()).postDelayed(new Runnable() {
-                public void run() {
-                    showUsbModeDialog();
-                    new android.os.Handler(getMainLooper()).postDelayed(new Runnable() {
-                        public void run() {
-                            try { if (usbDlg != null && usbDlg.isShowing()) usbDlg.dismiss(); } catch (Throwable ignore) { }
-                            usbDialogShown = false;   // 自动收起后必须复位，否则下次插线永远不再弹
-                        }
-                    }, 20000);
-                }
-            }, 1500);
-        }
+        // 2026-11-03 关键修正（用户报「系统操作不了了、旁边的按键全控制不了」）：
+        // 原来 App 一启动、只要线插着就 1.5 秒后自动弹这个模态窗，
+        // 之后 20 秒又自动关、再复位 usbDialogShown —— 结果是**绝大多数时间画面被
+        // 这个遮罩盖着**，点按键条全被它吃掉，看起来就是「按键全控制不了」。
+        // 改为：**启动时绝不自动弹**，只在真的发生「插线事件」的那一次弹。
+        Log.i(TAG, "usb: vbus=" + vbus + " gadget=" + gadget + " charging=" + charging
+                + " -> 启动不自动弹窗");
     }
 
     private static final String NL = String.valueOf((char) 10);
+
+    /** 真正可靠的"USB 在位"信号：/sys/class/power_supply 下任一 type=Mains 的 online==1。
+     *  本机（RC2）节点叫 aprimary-ac，不是通用的 usb，所以必须扫目录而不是写死路径。
+     *  用 isCharging() 判断会在电池自放电时误报 → 没插线也弹「USB 已连接」。*/
+    private boolean usbVbusOnline() {
+        final java.io.File dir = new java.io.File("/sys/class/power_supply");
+        final java.io.File[] list = dir.listFiles();
+        if (list == null) return false;
+        final String NL = String.valueOf((char) 10);
+        for (java.io.File d : list) {
+            try {
+                String type = readSmall(new java.io.File(d, "type")).trim();
+                if (!"Mains".equalsIgnoreCase(type) && !"USB".equalsIgnoreCase(type)
+                        && !"Usb".equalsIgnoreCase(type)) continue;
+                if ("1".equals(readSmall(new java.io.File(d, "online")).trim())) return true;
+            } catch (Throwable ignore) { }
+        }
+        return false;
+    }
+
+    private static String readSmall(java.io.File f) {
+        try {
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(f));
+            String ln = br.readLine(); br.close();
+            return ln == null ? "" : ln;
+        } catch (Throwable t) { return ""; }
+    }
 
     private void showHidHelpDialog() {
         new AlertDialog.Builder(this)
@@ -457,6 +487,27 @@ public class MainActivity extends Activity implements Host {
                     Log.i(TAG, "vtap " + vx + "," + vy);
                 } }, 60);
             } });
+        } else if ("fulltap".equals(act)) {
+            // 全屏原生页里的合成点击：与 vtap 一样派发给 RadioView，
+            // 但**不**退出全屏（vtap 会 setFullNative(false)，没法测按键条）。
+            final float vx = i.getIntExtra("tx", 0), vy = i.getIntExtra("ty", 0);
+            if (view != null) {
+                final long t0 = android.os.SystemClock.uptimeMillis();
+                view.post(new Runnable() { public void run() {
+                    android.view.MotionEvent d = android.view.MotionEvent.obtain(
+                            t0, t0, android.view.MotionEvent.ACTION_DOWN, vx, vy, 0);
+                    view.dispatchTouchEvent(d);
+                    d.recycle();
+                    view.postDelayed(new Runnable() { public void run() {
+                        long t1 = android.os.SystemClock.uptimeMillis();
+                        android.view.MotionEvent u = android.view.MotionEvent.obtain(
+                                t0, t1, android.view.MotionEvent.ACTION_UP, vx, vy, 0);
+                        view.dispatchTouchEvent(u);
+                        u.recycle();
+                        Log.i(TAG, "fulltap " + vx + "," + vy);
+                    } }, 60);
+                } });
+            }
         } else if ("touch".equals(act)) {
             // 可复现的触摸注入钩子：本 ROM 上 `adb shell input tap` 经常被吞掉
             // （getevent 抓不到内核事件），所以提供一条确定能到 libetx 的路。

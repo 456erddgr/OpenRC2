@@ -106,6 +106,16 @@ public class NativePanel extends Panel {
         return "原生";
     }
 
+    /** 开关位置：>0.3 上档(0)、<-0.3 下档(2)、其它中位(1)。 */
+    /** 开关位置：0=上 1=中 2=下（对应 EdgeTX SwitchHwPos）。
+     *  RC2 的物理开关不从 DUML 按钮帧来（这台机器根本没有 len!=30 的 06/AE 帧），
+     *  所以「无输入」一律按 **上档** 处理 —— 用户明确要求 CH5 这类开关通道应该是 -100%。*/
+    private static int swPos(float v) {
+        if (v > 0.6f) return 2;
+        if (v > 0.2f) return 1;
+        return 0;
+    }
+
     private int toAdc(float v) {
         int x = (int) (1024f + v * 660f);
         if (x < 0) x = 0;
@@ -118,7 +128,7 @@ public class NativePanel extends Panel {
     public void flushSettings() {
         try {
             for (int i = 0; i < 3; i++) {
-                queueKey(5);
+                queueKey(5);          // 5 = EXIT（返回/RTN）。见 native src/ui/etx_ui_glue.cpp 的 kKeyMap
                 tick();
                 Thread.sleep(40);
             }
@@ -134,7 +144,7 @@ public class NativePanel extends Panel {
         // 直接 shutdown 会让用户在系统设置里改的东西丢掉（用户报的就是这个）。
         try {
             for (int i = 0; i < 3; i++) {
-                queueKey(5);          // 5 = RTN
+                queueKey(5);          // 5 = EXIT（返回/RTN）。kKeyMap: 0=UP 1=DOWN 2=LEFT 3=RIGHT 4=ENTER 5=EXIT
                 tick();
                 Thread.sleep(40);
             }
@@ -197,10 +207,12 @@ public class NativePanel extends Panel {
         if (bmp == null) return;
         // 直接给硬件原始 11bit ADC（0..2047），由原生核心按 radio.yml 自行校准
         radio.fillNativeAxes(axes, knobsLocal);
-        sw[0] = radio.input.aux1 > 0.3f ? 1 : 0;
-        sw[1] = radio.input.aux2 > 0.3f ? 1 : 0;
-        sw[2] = radio.input.aux3 > 0.3f ? 1 : 0;
-        sw[3] = radio.input.aux4 > 0.3f ? 1 : 0;
+        // 2026-11-03：开关位置要送 0/1/2（上/中/下），原来只有 0/1，
+        // 而且负值（-1）被当成"按下"。现在按 aux 的正负判上/下，0 判中位。
+        sw[0] = swPos(radio.input.aux1);
+        sw[1] = swPos(radio.input.aux2);
+        sw[2] = swPos(radio.input.aux3);
+        sw[3] = swPos(radio.input.aux4);
         knobs[0] = knobsLocal[0];
         knobs[1] = knobsLocal[1];
         // 每约 1 秒把系统电池电压推给核心（V15 状态栏要显示真实电压）

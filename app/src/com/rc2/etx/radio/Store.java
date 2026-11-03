@@ -102,6 +102,23 @@ public final class Store {
         }
     }
 
+    /** 插帧层的冲程校准（StickSmooth 的 mid/neg/pos），与 Calib 分开存。 */
+    public static String loadStickCalib(Context c) {
+        try {
+            return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("stickCalib", "");
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    public static void saveStickCalib(Context c, String json) {
+        try {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("stickCalib", json).apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "saveStickCalib failed: " + t);
+        }
+    }
+
     public static String loadCalib(Context c) {
         try {
             SharedPreferences sp = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);

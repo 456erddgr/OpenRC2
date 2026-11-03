@@ -59,6 +59,12 @@ public final class StickSmooth {
         level = lv;
     }
 
+    /** 轴名（用于校准页提示）：0=LH 1=LV 2=RV 3=RH 4=P1 5=P2。 */
+    public static String axisName(int i) {
+        String[] n = {"LH", "LV", "RV", "RH", "P1", "P2"};
+        return (i >= 0 && i < n.length) ? n[i] : ("A" + i);
+    }
+
     public static String levelName(int lv) {
         switch (lv) {
             case 0: return "关";
@@ -78,6 +84,60 @@ public final class StickSmooth {
         for (int i = 0; i < N; i++) { vel[i] = 0f; acc[i] = 0f; step[i] = 0f; zero[i] = 0f;
             y[i] = 0f; yPrev[i] = 0f; yLast[i] = 0f; }
         tPrev = 0L; tLast = 0L;
+    }
+
+    // ---------- 校准的持久化（2026-11-03）----------
+    // 以前校准只存在内存里，App 一重启就丢 → 用户「校准完再打开又变回去」。
+    // 现在存 SharedPreferences：{"en":1,"mid":[..],"neg":[..],"pos":[..]}
+    public synchronized boolean hasCal() {
+        for (int k = 0; k < N; k++) if (calOk[k]) return true;
+        return false;
+    }
+
+    /** 导出当前校准（未校准的轴导出 enabled=0）。 */
+    public synchronized String exportCal() {
+        StringBuilder sb = new StringBuilder("{");
+        boolean any = false;
+        for (int i = 0; i < N; i++) if (calOk[i]) { any = true; break; }
+        sb.append("\"en\":").append(any);
+        sb.append(",\"mid\":[");
+        for (int i = 0; i < N; i++) sb.append(i == 0 ? "" : ",").append(round3(calMid[i]));
+        sb.append("],\"neg\":[");
+        for (int i = 0; i < N; i++) sb.append(i == 0 ? "" : ",").append(round3(calNeg[i]));
+        sb.append("],\"pos\":[");
+        for (int i = 0; i < N; i++) sb.append(i == 0 ? "" : ",").append(round3(calPos[i]));
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    /** 导入校准；解析失败或没有有效轴时返回 false（保持未校准状态）。 */
+    public synchronized boolean importCal(String json) {
+        if (json == null || json.length() < 8) return false;
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(json);
+            org.json.JSONArray jm = o.optJSONArray("mid");
+            org.json.JSONArray jn = o.optJSONArray("neg");
+            org.json.JSONArray jp = o.optJSONArray("pos");
+            if (jm == null || jn == null || jp == null) return false;
+            if (jm.length() < N || jn.length() < N || jp.length() < N) return false;
+            for (int i = 0; i < N; i++) {
+                float mid = (float) jm.getDouble(i);
+                float neg = (float) jn.getDouble(i);
+                float pos = (float) jp.getDouble(i);
+                if (neg < 0.15f) neg = 0.15f;
+                if (pos < 0.15f) pos = 0.15f;
+                calMid[i] = mid; calNeg[i] = neg; calPos[i] = pos;
+                calOk[i] = true;
+                zero[i] = 0f;
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private static String round3(float v) {
+        return String.format(java.util.Locale.US, "%.3f", v);
     }
 
     /** 收到一个新样本时调用一次（单位 -1..1）。 */
@@ -143,6 +203,15 @@ public final class StickSmooth {
             }
             // 任一轴离开中心区就立即冻结学习（zero 保持不动）
 
+            // 2026-11-03 修「校准后回中还是 1/2/3 不是 0」：
+            // 冲程标定的 calMid 只是 8 秒采样窗的平均中点，物理杆真正回中时
+            // 与它仍差 1~3%，表现为「杆松手了却显示 2%」。这里在静止时把 calMid
+            // 缓慢拉向真实静止值（每帧 8%，夹在本值 ±0.12 内，绝不越界乱跑）。
+            if (calOk[i] && hist >= 1 && Math.abs(d) < 0.004f
+                    && Math.abs(h2[i] - calMid[i]) < 0.12f) {
+                calMid[i] += 0.08f * (h2[i] - calMid[i]);
+            }
+
             if (hist >= 3) {
                 float vPrev = (h1[i] - h0[i]) / dt1;
                 float aNow = (vel[i] - vPrev) * 1000f / (0.5f * (dt1 + dt2));   // 单位/秒²
@@ -181,6 +250,8 @@ public final class StickSmooth {
             float base = yPrev[i] + (yLast[i] - yPrev[i]) * u;   // 帧间插值后的位置
             float tgt;
             if (calOk[i]) {
+                // calMid 是冲程标定时的中点，物理头回中后仍会有 1~3% 残差；
+                // 该残差由 sample() 里的「中点微调」持续吞掉（见下面 calOk 的学习分支）。
                 float d2 = base - calMid[i];
                 tgt = d2 >= 0f ? d2 / calPos[i] : d2 / calNeg[i];
             } else {

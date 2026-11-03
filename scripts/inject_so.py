@@ -43,20 +43,30 @@ def main():
             n += 1
             print('  + lib/%s/%s %d B' % (abi, name, len(data)))
 
+    # assets：aapt2 link 那一步已经用 -A assets 把 app/assets 打进去了（build-apk.ps1:50），
+    # 这里再写一遍就会出现同名条目 → apksigner 直接报
+    #   "Multiple ZIP entries with the same name: assets/sd_seed/RADIO/radio.yml"。
+    # 所以只补 base.apk 里**没有**的条目（正常情况下一个都不用补）。
+    existing = set(zout.namelist())
     a = 0
+    skipped = 0
     if assets_dir and os.path.isdir(assets_dir):
         for root, _dirs, files in os.walk(assets_dir):
             for fn in sorted(files):
                 full = os.path.join(root, fn)
                 rel = os.path.relpath(full, assets_dir).replace(chr(92), '/')
+                name = 'assets/' + rel
+                if name in existing:
+                    skipped += 1
+                    continue
                 with open(full, 'rb') as f:
                     data = f.read()
-                zout.writestr(_zi('assets/' + rel), data)
+                zout.writestr(_zi(name), data)
                 a += 1
 
     zout.close()
     zin.close()
-    print('injected %d so, %d asset files -> %s' % (n, a, out))
+    print('injected %d so, %d asset files (%d already in base) -> %s' % (n, a, skipped, out))
 
 if __name__ == '__main__':
     main()

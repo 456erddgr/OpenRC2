@@ -41,11 +41,15 @@ public final class Calib {
         for (int i = 0; i < AXES; i++) {
             boolean sw = (i >= 4 && i <= 7);
             min[i] = -1f;
-            mid[i] = sw ? 0f : 0f;
+            mid[i] = 0f;
             max[i] = 1f;
             reverse[i] = false;
             moved[i] = false;
-            raw[i] = sw ? -1f : 0f;
+            // 2026-11-03：开关/旋钮的"没信号"值必须是 0（中位）。
+            // 原来 switch 轴 raw=-1，于是 CH5..CH8 在混控里恒为 -100%，
+            // 并且校准页把这些 -1 当成中点写回（设备上的 calib JSON 里 mid 第 4..7 位
+            // 就是 -1.000），校准后依然全负。
+            raw[i] = 0f;
         }
         enabled = false;
         capturing = false;

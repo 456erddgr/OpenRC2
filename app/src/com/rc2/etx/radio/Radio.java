@@ -60,6 +60,7 @@ public final class Radio {
     private long stillSince = 0L;
     private final float[] sv = new float[6];
     private long lastStickSeq = -1;
+    private long lastSampleAt = 0L;
     public final Model model;
     private final Mixer mixer = new Mixer();
     private final CrsfEncoder.Encoder encoder = new CrsfEncoder.Encoder();
@@ -102,26 +103,30 @@ public final class Radio {
         model = Store.load(c);
         calib.fromJson(Store.loadCalib(c));
         yml = RadioYml.load(RadioYml.defaultFile(c.getExternalFilesDir(null)));
-        if (yml.ok) {
-            // MCU 通道 -> radio.yml 轴序：ch0=RH ch1=RV ch2=LV ch3=LH ch4=P1 ch5=P2
-            int[] map = {3, 2, 1, 0, 4, 5};
+        // 2026-11-03 关键修正：
+        // radio.yml 里的 calib(mid/spanNeg/spanPos) 是**原版 V15 硬件 ADC** 的标定窗口
+        // （例如 LH mid=1059/span=1043），而 DJI 06/AE 帧的中点固定是 1024、行程 ±660。
+        // 把 V15 的窗口套到 DJI 原始值上会同时造成两个用户可见的毛病：
+        //   ① 中点偏移：1024 经 (1024-1059)/1043 = -0.034 → 静止时通道不是 0；
+        //   ② 推不满：DJI 满行程 1684 经 (1684-1059)/974 = 0.64 → 只能到 64%，
+        //      用户说的「推满只有 0 / 校准后也推不满」就是这条。
+        // 因此这里统一用 DJI 自己的窗口（中点 1024、行程 ±660），radio.yml 只作诊断显示。
+        {
             int[] m = new int[6], ng = new int[6], ps = new int[6];
             for (int i = 0; i < 6; i++) {
-                m[i] = yml.mid[map[i]];
-                ng[i] = yml.spanNeg[map[i]];
-                ps[i] = yml.spanPos[map[i]];
+                m[i] = 1024;
+                ng[i] = 660;
+                ps[i] = 660;
             }
             duml.setAxisSpans(m, ng, ps);
         }
         input.calib = calib;
-        // 校准结果在每次启动都要重新落到 raw 行程上，否则重启即失效
-        if (calib.enabled) {
-            int[] mcuCh = {3, 2, 0, 1};        // calib 轴 LX/LY/RX/RY -> MCU LH/LV/RH/RV
-            for (int a = 0; a < 4; a++) {
-                float m = calib.max[a];
-                if (m > 0.3f && m < 1.5f) duml.shrinkSpan(mcuCh[a], m);
-            }
-        }
+        // 恢复上次的插帧冲程校准（2026-11-03）：以前只存在内存里，
+        // App 一重启就丢 → 用户「校准完再打开又偏回去」。
+        smooth.importCal(Store.loadStickCalib(c));
+        // 旧版在这里按 calib.max 调 duml.shrinkSpan()：那是**非幂等**的缩放，
+        // 每开机一次行程就再缩一次 → 反复重启后摇杆越来越偏、越来越推不满。
+        // 现在行程改由 Calib（min/mid/max，一次标定、幂等）负责，这里不再缩放。
         mixer.setConfig(model.ch);
         input.reset();
         dumlOn = Store.loadDumlOn(c);
@@ -193,8 +198,26 @@ public final class Radio {
     // real EdgeTX mixer without touching the hardware.
     public volatile boolean forceSynthAxes = false;
 
+    /**
+     * 摇杆数据源是否还活着。
+     * 2026-11-03 关键修复：RC Pro(RM510) 的 TCP 40007 是"连一次给一帧就断"，
+     * duml.connected 大部分时间是 false，只有 binder(RcProStick) 一直有数据。
+     * 以前 tick()/fillNativeAxes7() 只看 duml.connected，
+     * 于是 RC Pro 上：
+     *   · tick() 从不调 input.touch() → 混控一直读 reset() 留下的值
+     *     （油门 -1、开关 -1）→ 开机就是一片 -100%，而且杆子怎么推都不动；
+     *   · fillNativeAxes7() 走 synth 分支 → 原生核心拿到的是 reset 的假值。
+     * 现在只要两个源里有一个活着就当有数据。
+     */
+    public boolean stickSourceAlive() {
+        if (!dumlOn) return false;
+        if (duml.connected && duml.stickFrames > 0) return true;
+        com.rc2.etx.input.RcProStick r = rcpro;
+        return r != null && r.connected;
+    }
+
     public void fillNativeAxes7(int[] axes7) {
-        boolean live = !forceSynthAxes && dumlOn && duml.connected && duml.stickFrames > 0;
+        boolean live = !forceSynthAxes && stickSourceAlive();
         if (live) {
             duml.copyRaw(rawSnap);
             // DJI 的 06/AE 帧是「中点 1024、满行程 364..1684」；而 EdgeTX 核心按 radio.yml
@@ -216,8 +239,8 @@ public final class Radio {
                 axes7[1] = svToAdc(sv[1]); // LV 油门
                 axes7[2] = svToAdc(sv[3]); // RV 俯仰
                 axes7[3] = svToAdc(sv[2]); // RH 副翼
-                axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
-                axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
+                axes7[4] = potOrMin(rawSnap[4]); // P1（无旋钮硬件 → 0 = -100%）
+                axes7[5] = potOrMin(rawSnap[5]); // P2
                 smoothed = true;
             }
             if (!smoothed) {
@@ -225,11 +248,14 @@ public final class Radio {
                 axes7[1] = djiToEtxAdc(rawSnap[2]); // LV
                 axes7[2] = djiToEtxAdc(rawSnap[1]); // RV
                 axes7[3] = djiToEtxAdc(rawSnap[0]); // RH
-                axes7[4] = djiToEtxAdc(rawSnap[4]); // P1
-                axes7[5] = djiToEtxAdc(rawSnap[5]); // P2
+                axes7[4] = potOrMin(rawSnap[4]); // P1
+                axes7[5] = potOrMin(rawSnap[5]); // P2
             }
-            axes7[6] = 1024;                    // P3（无硬件）
+            axes7[6] = 0;                       // P3（无硬件）→ CH7 = -100%
             applyRcProButtons(axes7);
+            // 2026-11-03：摇杆以外的通道（旋钮/拨杆）不能停在 0。
+            // 之前 P1/P2 未接线时是 0，EdgeTX 的 switch 通道会读到 -1024（= -100%），
+            // 这正是用户说的「打开就全负 100%」。改成中位 1024。
         } else {
             axes7[0] = synthAdc(input.lx);   // LH  (yaw)
             axes7[1] = synthAdc(input.ly);   // LV  (throttle)
@@ -298,6 +324,16 @@ public final class Radio {
      */
     private int svToAdc(float v) {
         return synthAdc(v);
+    }
+
+    /** P1/P2/P3 这类"没接硬件就当最低档"的电位器：
+     *  用户明确要求 CH5 不是我们造的摇杆、它本来就该是 -100%（= ADC 0），
+     *  DJI 帧里这几路在没有旋钮的机型上恒为 1024（中点），直接换算会变成 0%。
+     *  所以「恒在中点」的通道按 0（最低档）输出；真接了旋钮（RC Pro 的波轮走
+     *  binder ch4/ch5）时由 applyRcProButtons() 覆盖成真实值。*/
+    private int potOrMin(int djiRaw) {
+        if (djiRaw <= 0 || Math.abs(djiRaw - 1024) <= DJI_CENTER_DEAD) return 0;
+        return djiToEtxAdc(djiRaw);
     }
 
     private int djiToEtxAdc(int djiRaw) {
@@ -558,6 +594,11 @@ public final class Radio {
         mixer.setConfig(model.ch);
     }
 
+    /** 落盘插帧校准（校准页调用）。 */
+    public void saveStickCalibration() {
+        Store.saveStickCalib(ctx, smooth.exportCal());
+    }
+
     public void save() {
         Store.save(ctx, model);
         Store.saveCalib(ctx, calib.toJson());
@@ -609,13 +650,17 @@ public final class Radio {
 
     private void tick() {
         long now = SystemClock.elapsedRealtime();
-        if (dumlOn && duml.connected) {
+        if (stickSourceAlive()) {
             // 6 个 ADC 轴：前 4 根当摇杆，后 2 根暂当旋钮；映射由校准页拟合后修正
             long nowMs = android.os.SystemClock.uptimeMillis();
+            // 采样触发条件：TCP 的 stickFrames 变了，或者 binder 补帧过（RC Pro 常态）。
+            // 原来只看 duml.stickFrames，RC Pro 上 binder 补帧不推进这个计数 → 永远不采样。
             long sf = duml.stickFrames;
-            if (sf != lastStickSeq) {
+            boolean binderFresh = (now - lastBinderMs) < 250L;
+            if (sf != lastStickSeq || (binderFresh && (now - lastSampleAt) > 20L)) {
                 lastStickSeq = sf;
                 lastStickFrameAt = now;
+                lastSampleAt = now;
                 wdInBurst = 0;
                 // 真机标定（用户 2026-10-31 实测）：axis0=AIL(右横) axis1=ELE(右纵)
                 // axis2=THR(左纵) axis3=RUD(左横)，即 AETR 顺序，与 EdgeTX 默认一致。
@@ -730,10 +775,20 @@ public final class Radio {
      * 这里把五维与返回映射成 EdgeTX 的导航键，C1..C3 映射成 P1..P3 三档开关。
      */
     private void applyRcProButtons(int[] axes7) {
-        if (duml == null || !duml.isSnapMode()) return;
-        if (duml.btnAgeMs() > 1500) return;          // 帧停了就别再动开关
-        int p1 = duml.btnRaw(1);
-        int p2 = duml.btnRaw(2);
+        // 2026-11-03 修正「拨杆没有适配」：
+        // ① 原来要求 duml.isSnapMode() 才生效 —— 那是 RC Pro「连一次给一帧就断」
+        //    才会置位的标志；正常连着时反而是 false ⇒ 拨杆永远没反应。
+        //    现在改成：只要按钮帧是新鲜的（btnAgeMs 小）就生效。
+        // ② P1/P2/P3 原来只在 b2 变化的那一帧写，而且写的是 2047/0（两档），
+        //    不回中到 1024 ⇒ 开关会"卡在按下的位置"。现在每帧都写，中位 1024。
+        // ③ RC Pro 的挡位/拨轮其实在 binder 的 ch4/ch5（两个波轮），也接进来。
+        int p1 = 0, p2 = 0;
+        boolean btnFresh = false;
+        if (duml != null && duml.btnAgeMs() <= 1500) {
+            p1 = duml.btnRaw(1);
+            p2 = duml.btnRaw(2);
+            btnFresh = true;
+        }
 
         int nav = 0;
         if ((p1 & 0x80) != 0) nav = 0;               // ↑
@@ -742,25 +797,27 @@ public final class Radio {
         else if ((p1 & 0x10) != 0) nav = 3;          // →
         else if ((p1 & 0x08) != 0) nav = 4;          // 中 = ENT
         else if ((p2 & 0x20) != 0) nav = 5;          // 返回 = RTN
-        if (nav != lastNav) {
-            if (nav >= 0) {
-                try {
-                    com.rc2.etx.jni.EtxNative.press(nav);
-                    keysSent++;
-                } catch (Throwable ignore) {
-                }
+        if (btnFresh && nav != lastNav) {
+            try {
+                com.rc2.etx.jni.EtxNative.press(nav);
+                keysSent++;
+            } catch (Throwable ignore) {
             }
             lastNav = nav;
         }
 
-        int b2 = p2 & 0x1C;
-        if (b2 != lastBtn2) {
-            axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
-            axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
-            axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;    // C3 → P3
-            lastBtn2 = b2;
+        // P1/P2/P3：C1/C2/C3 三个自定义键 → 三个开关通道，每帧都写（中位 1024）
+        axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
+        axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
+        axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;    // C3 → P3
+
+        // RC Pro 的两个波轮（binder ch4=左波轮 ch5=右波轮，1024 为中位）
+        com.rc2.etx.input.RcProStick r = rcpro;
+        if (r != null && r.connected && r.raw != null && r.raw.length >= 6) {
+            int[] v = r.raw;
+            axes7[4] = clampAdc(v[4]);
+            axes7[5] = clampAdc(v[5]);
         }
-        if (nav < 0) lastNav = -1;
     }
 
 

@@ -62,9 +62,15 @@ public final class OutputPanel extends Panel {
             ui.button(c, kindR[i], KIND[i], on ? Ui.ACC : Ui.BLUE, on, 14);
         }
         ui.text(c, "波特率（USB）", left.left + ui.d(12), left.top + ui.d(244), 12, Ui.DIM, false);
+        // 2026-11-03 修正：原来三个按钮横排（每档 90dp 宽、第三档右缘到 d(276)），
+        // 而左卡片只有 40% 屏宽 → 第三个按钮会被切掉/压到「应用并打开」上。
+        // 改成两列网格：上排两个、下排一个，全部落在卡片内。
+        float bw = (left.width() - ui.d(12) * 2 - ui.d(8)) / 2f;
         for (int i = 0; i < 3; i++) {
-            baudR[i].set(left.left + ui.d(12) + i * ui.d(90), left.top + ui.d(254),
-                    left.left + ui.d(12) + i * ui.d(90) + ui.d(84), left.top + ui.d(254) + ui.d(36));
+            int col = i % 2, row = i / 2;
+            float bx = left.left + ui.d(12) + col * (bw + ui.d(8));
+            float by = left.top + ui.d(254) + row * ui.d(42);
+            baudR[i].set(bx, by, bx + bw, by + ui.d(36));
             boolean on = (i == baudIdx);
             ui.button(c, baudR[i], String.valueOf(BAUD[i]), on ? Ui.ACC : Ui.BLUE, on, 12);
         }
@@ -101,7 +107,10 @@ public final class OutputPanel extends Panel {
         y += ui.d(30);
         infoR.set(x, y, right.right - ui.d(12), right.bottom - ui.d(12));
         ui.card(c, infoR, 0xFF121820);
-        drawWrapped(c, ui, lastInfo, infoR.left + ui.d(8), infoR.top + ui.d(18), infoR.width() - ui.d(16), 11);
+        drawWrapped(c, ui, (lastInfo == null || lastInfo.length() == 0)
+                        ? "（还没有输出日志。点「发送 100 帧」或「扫描 USB 设备」看结果。）"
+                        : lastInfo,
+                infoR.left + ui.d(8), infoR.top + ui.d(18), infoR.width() - ui.d(16), 11);
     }
 
     private void drawWrapped(Canvas c, Ui ui, String text, float x, float y0, float maxW, float sp) {
@@ -110,14 +119,18 @@ public final class OutputPanel extends Panel {
         for (String raw : text.split("\n")) {
             StringBuilder line = new StringBuilder();
             for (int i = 0; i < raw.length(); i++) {
-                line.append(raw.charAt(i));
-                if (ui.w(line.toString(), sp, false) > maxW) {
-                    line.setLength(line.length() - 1);
+                char ch = raw.charAt(i);
+                // 先量再加：原来"先加后量、超宽再回退一个字符"，在换行点上会把
+                // 那个字符重复画一次并丢掉行尾字符（用户说输出页显示有 bug）。
+                String probe = line.toString() + ch;
+                if (line.length() > 0 && ui.w(probe, sp, false) > maxW) {
                     ui.text(c, line.toString(), x, y, sp, Ui.DIM, false);
                     line.setLength(0);
-                    line.append(raw.charAt(i));
+                    line.append(ch);
                     y += ui.d(sp * 1.5f);
                     if (y > infoR.bottom - ui.d(4)) return;
+                } else {
+                    line.append(ch);
                 }
             }
             ui.text(c, line.toString(), x, y, sp, Ui.DIM, false);
@@ -221,8 +234,11 @@ public final class OutputPanel extends Panel {
             lastInfo = "当前输出未打开，先点「应用并打开」。";
             return;
         }
-        int[] us = radio.usSnapshot();
-        byte[] f = new byte[20];
+        // CRSF 一帧只带 4 个通道（AETR），而 usSnapshot() 给的是 8 路。
+        // 原来直接把 8 路丢进去，显示出来的 hex 和实际发出去的帧对不上。
+        int[] all = radio.usSnapshot();
+        int[] us = new int[4];
+        System.arraycopy(all, 0, us, 0, Math.min(4, all.length));
         byte[] frame = new byte[26];
         com.rc2.etx.radio.CrsfEncoder.pack(us, frame);
         long before = s.frames();

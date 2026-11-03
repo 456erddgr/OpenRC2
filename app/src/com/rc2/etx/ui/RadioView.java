@@ -186,6 +186,15 @@ public final class RadioView extends View {
     private final RectF fullR = new RectF();
     /** 全屏模式下的合成按键条（RC2 没有方向键，只能软件补） */
     private final String[] KEY_LAB = {"↑", "↓", "←", "→", "ENT", "RTN", "PG↑", "PG↓"};
+    // 键码表（RC2-EdgeTX-Native/src/ui/etx_ui_glue.cpp 的 kKeyMap[10]）：
+    //   0=UP 1=DOWN 2=LEFT 3=RIGHT 4=ENTER 5=EXIT 6=PAGEUP 7=PAGEDN 8=MODEL 9=TELE
+    // 注意这是**我们自己的编号**，不是 EdgeTX 的 EnumKeys（EnumKeys 里
+    // KEY_ENTER=2、KEY_EXIT=1、KEY_UP=5…）。原生侧 etx_ui_key() 会用 kKeyMap
+    // 把它翻译成真正的 EnumKeys 再交给 EdgeTX。
+    // 2026-11-03：之前这里填 {0,1,2,3,4,5,6,7}，正好等于按键条下标，
+    // 与 kKeyMap 的语义一致（↑↓←→ ENT RTN PG↑ PG↓ → 0..7），所以键位没错；
+    // 真正错的是 NativePanel 里把 RTN 当成 5（那是 DOWN）——已改成 5=EXIT 是对的。
+    // 保持 {0,1,2,3,4,5,6,7}。
     private final int[] KEY_CODE = {0, 1, 2, 3, 4, 5, 6, 7};
     private final RectF[] keyR = new RectF[8];
     private float stripTop;

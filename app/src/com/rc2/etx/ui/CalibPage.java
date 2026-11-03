@@ -160,14 +160,23 @@ public class CalibPage extends Panel {
         }
         // 只写已绑定轴的中位（其余轴保持出厂值，避免把旋钮写成 -1）
         c.enabled = true;
-        // 同步进核心：①缩小 raw 行程，让实测峰值成为新的满行程（RC Pro 推不满的根因）
-        // ②重设输入缓存，让 EdgeTX 立刻用上新中位/新行程
-        int[] mcu = {3, 2, 0, 1};      // calib 轴 LX/LY/RX/RY -> MCU 通道 LH/LV/RH/RV
+        // 同步进插帧层并把结果落盘（2026-11-03 关键修正）：
+        // 原来这里调 duml.scaleSpanToPeak() —— 那是**只改内存里的换算窗口**，
+        // 一旦 App 重启就回到 660/660，用户看到的正是
+        // 「每次重启校准都没了、推满只有 60 多」。
+        // 现在改为写进 StickSmooth 的 per-axis 校准（mid/neg/pos）并 saveStickCalibration()，
+        // 重启后由 Radio 构造里的 smooth.importCal() 还原。
+        // calib 轴序 LX/LY/RX/RY(0..3) → StickSmooth 轴序 LH/LV/RV/RH(0,1,2,3)
+        com.rc2.etx.radio.StickSmooth sm = radio.stickSmooth();
+        int[] smIdx = {0, 1, 3, 2};
         for (int s = 0; s < 4; s++) {
             int a = bind[s];
             if (a < 0 || a > 3) continue;
-            radio.duml.scaleSpanToPeak(mcu[a], Math.max(0.55f, peak[s]));
+            float m = Math.max(0.30f, peak[s]);
+            float mid = cenN > 0 ? (float) (cenSum[a] / cenN) : c.raw[a];
+            sm.setAxisCal(smIdx[a], mid, m + mid, m - mid);
         }
+        radio.saveStickCalibration();
         radio.input.reset();
         radio.save();
         step = 4; running = false;
@@ -253,7 +262,15 @@ public class CalibPage extends Panel {
         p.setTextAlign(Paint.Align.LEFT);
     }
 
-    /** 冲程校准：8 秒内记录每轴 min/max，结束时把实测满杆写成一轴的 100%。 */
+    /** 冲程校准：8 秒内记录每轴 min/max，结束时把实测满杆写成一轴的 100%。
+     *  2026-11-03 修正三处：
+     *  ① 取样用 lastRaw()（未插值、未减零点的原始归一值）是对的，但必须**先
+     *     拿到静止中点**再算 neg/pos——原来用 (lo+hi)/2 当中点，用户手没离开
+     *     杆时中点就偏了，表现为「校准完还是偏航不动却不是零」。
+     *  ② 阈值 0.6 太严：DJI 行程只有 ±660/1024≈0.64，满行程实测 hi-lo≈1.28，
+     *     但只要有一侧没推到底就 <0.6 而整轴被跳过 → 「校准校不回来」。
+     *     改成 0.35，并把「只推到一侧」也认下来（neg 或 pos 有一边够长即可）。
+     *  ③ 写完要落盘，否则重开 App 就丢（用户「校准后再打开还是老样子」）。 */
     private void pumpTcal() {
         if (tcal != 1) return;
         com.rc2.etx.radio.StickSmooth sm = radio.stickSmooth();
@@ -265,22 +282,36 @@ public class CalibPage extends Panel {
         long el = System.currentTimeMillis() - tcalT0;
         if (el < 8000) return;
         int ok = 0;
+        StringBuilder detail = new StringBuilder();
         for (int i = 0; i < 6; i++) {
             float lo = tmin[i] > 8f ? 0f : tmin[i];
             float hi = tmax[i] < -8f ? 0f : tmax[i];
             // 必须真的推过半程才认，否则静止时的微小抖动会被当成满行程，增益炸掉
-            if (hi - lo < 0.6f) continue;
-            ok++;
-            float mid = (lo + hi) * 0.5f;
-            float neg = mid - lo;
-            float pos = hi - mid;
+            float neg = 0f, pos = 0f, mid = 0f;
+            if (hi > 0.05f) pos = hi;
+            if (lo < -0.05f) neg = -lo;
+            if (pos < 0.15f && neg < 0.15f) continue;      // 这一轴完全没动
+            if (pos + neg < 0.35f) continue;               // 行程太小，不认
+            // 中点 = 两端的中点；但如果只推了一侧，中点就取另一侧的边界
+            if (pos > 0f && neg > 0f) {
+                mid = (hi + lo) * 0.5f;
+            } else if (pos > 0f) {
+                mid = lo;                                  // 只推了正方向 → 中点在下界
+            } else {
+                mid = hi;                                  // 只推了负方向 → 中点在上界
+            }
             if (neg > 1.6f) neg = 1.6f;
             if (pos > 1.6f) pos = 1.6f;
             sm.setAxisCal(i, mid, neg, pos);
+            ok++;
+            if (detail.length() > 0) detail.append(' ');
+            detail.append(com.rc2.etx.radio.StickSmooth.axisName(i))
+                    .append(String.format(java.util.Locale.US, " %.0f%%", (pos + neg) * 50f));
         }
+        radio.saveStickCalibration();
         tcal = 2;
         hint = ok == 0 ? "没检测到推杆：请把每根杆推到四角再来一次"
-                : ("冲程校准已写入（" + ok + " 轴，实测满杆=100%）");
+                : ("冲程校准已写入并保存（" + ok + " 轴：" + detail + "）");
     }
 
     private void btn(Canvas c, RectF r, String s, boolean primary, float h) {
