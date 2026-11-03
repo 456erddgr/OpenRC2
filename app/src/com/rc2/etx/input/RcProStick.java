@@ -21,16 +21,40 @@ import android.util.Log;
  *
  * 数据口径（与 RM510 对接包一致）：6 个通道，0..2048，中位 1024，物理行程 ±660。
  *   ch0 右摇杆水平 / ch1 右摇杆竖直 / ch2 左摇杆竖直 / ch3 左摇杆水平 / ch4 左波轮 / ch5 右波轮
+ *
+ * 2026-11-03 修复「RC Pro 移植系统六轴全 -100%、怎么动都不动」：
+ *  1) raw 初值原来是 new int[6]（**全 0**）。Radio 的桥线程只要 connected==true 就把
+ *     raw 整体拷进 duml.raw，而 duml 的归一化是 (raw-1024)/660 ——
+ *     全 0 正好等于「六轴全部推到底」= 每个通道 -100%，
+ *     而且之后每一帧都还是 0，所以杆子怎么动都不动。现在初值是中位 1024。
+ *  2) 新增"载荷可信度"校验：6 个通道同时精确为 0 在物理上不可能（回中值是 1024），
+ *     那是**载荷没解析出来**的签名。这种帧记 badFrames 但不发布，
+ *     免得把"解析失败"伪装成"摇杆到底"。
+ *  3) 新增 lastFrameMs / fresh(ms)：上层判断数据源存活不能再依赖 connected
+ *     （RC Pro 的 TCP 是"连一次给一帧就断"，connected 绝大部分时间是 false）。
  */
 public final class RcProStick {
 
     private static final String TAG = "ETXRcPro";
     public static final int AXES = 6;
+    /** DJI 通道中位。 */
+    public static final int MID = 1024;
 
     /** 最近一帧通道值（0..2048）。整体替换，避免读到半帧。 */
     public volatile int[] raw = new int[AXES];
     public volatile boolean connected;
     public volatile long frames;
+    /** 被判为"载荷不可信"而丢弃的帧数（诊断用）。 */
+    public volatile long badFrames;
+    /** 最近一次收到**可信**通道帧的时间（SystemClock.elapsedRealtime，单调、含休眠）。 */
+    public volatile long lastFrameMs;
+    /** 最近一帧的 6 通道（原始值，便于诊断页/日志直接对照）。 */
+    public volatile String lastValues = "-";
+    /** 旁键（06/174）最近一次载荷 p0/p1/p2 与年龄。 */
+    public volatile int btn0, btn1, btn2;
+    public volatile long btnMs;
+    public volatile long btnFrames;
+    public volatile String lastBtnHex = "-";
     public volatile String error = "-";
 
     private Context ctx;
@@ -45,13 +69,44 @@ public final class RcProStick {
                 if (v != null && v.length >= AXES) {
                     int[] copy = new int[AXES];
                     System.arraycopy(v, 0, copy, 0, AXES);
+                    // 全 0 = 载荷没解析出来的签名（回中应该是 1024），丢弃不发布。
+                    // 详见类注释第 2 条：这是"六轴全 -100%"的直接成因。
+                    if (isAllZero(copy)) {
+                        badFrames++;
+                        if (badFrames == 1 || badFrames % 500 == 0) {
+                            Log.w(TAG, "丢弃全 0 通道帧 x" + badFrames
+                                    + "（载荷未解析，长度/布局可能变了）");
+                        }
+                        return;
+                    }
                     raw = copy;
+                    lastFrameMs = android.os.SystemClock.elapsedRealtime();
                     connected = true;
                     frames++;
+                    if (frames <= 3 || frames % 600 == 0) {
+                        lastValues = copy[0] + "," + copy[1] + "," + copy[2] + ","
+                                + copy[3] + "," + copy[4] + "," + copy[5];
+                        Log.i(TAG, "chan=" + lastValues + " frames=" + frames);
+                    }
+                }
+            } else if (msg.what == RcProService.MSG_BTN && msg.obj instanceof Bundle) {
+                Bundle b = (Bundle) msg.obj;
+                btn0 = b.getInt(RcProService.KEY_B0, 0);
+                btn1 = b.getInt(RcProService.KEY_B1, 0);
+                btn2 = b.getInt(RcProService.KEY_B2, 0);
+                lastBtnHex = b.getString(RcProService.KEY_HEX, "-");
+                btnMs = android.os.SystemClock.elapsedRealtime();
+                btnFrames++;
+                if (btnFrames <= 3) {
+                    Log.i(TAG, "btn p0=" + btn0 + " p1=" + btn1 + " p2=" + btn2
+                            + " hex=" + lastBtnHex);
                 }
             } else if (msg.what == RcProService.MSG_ERROR) {
                 error = msg.obj == null ? "?" : String.valueOf(msg.obj);
-                connected = false;
+                // 注意：这里不再把 connected 置 false。
+                // 一次 transact 失败不等于数据源死了（RC Pro 上偶尔会失败一帧），
+                // 用 fresh() 的时间窗口来判断才准；否则会出现"抖一下就连带把
+                // 整条输入链判死"（= 又回到六轴全 -100% 的老症状）。
             }
         }
     });
@@ -69,8 +124,32 @@ public final class RcProStick {
                 error = e.toString();
             }
         }
-        @Override public void onServiceDisconnected(ComponentName n) { bound = false; remote = null; connected = false; }
+        @Override public void onServiceDisconnected(ComponentName n) { bound = false; remote = null; }
     };
+
+    /** 6 个通道同时为 0 = 不可能的回中值 → 判为坏帧。 */
+    private static boolean isAllZero(int[] v) {
+        for (int i = 0; i < AXES; i++) if (v[i] != 0) return false;
+        return true;
+    }
+
+    /** 数据是否新鲜：最近 ms 毫秒内收到过可信帧。 */
+    public boolean fresh(long ms) {
+        long t = lastFrameMs;
+        if (t <= 0) return false;
+        // 单调时钟 + 下溢保护：d 为负（时间源混用/时钟异常）时只判"不新鲜"，
+        // 绝不像 `d < ms` 那样恒为 true 把死源当活源。理由见 DumlStick.stickFresh()。
+        long d = android.os.SystemClock.elapsedRealtime() - t;
+        return d >= 0 && d < ms;
+    }
+
+    /** 旁键载荷是否新鲜。 */
+    public boolean btnFresh(long ms) {
+        long t = btnMs;
+        if (t <= 0) return false;
+        long d = android.os.SystemClock.elapsedRealtime() - t;
+        return d >= 0 && d < ms;
+    }
 
     /** 能否用这条路（有 protocol 服务才行）。 */
     public static boolean available(Context c) {
@@ -101,7 +180,6 @@ public final class RcProStick {
             try { ctx.unbindService(conn); } catch (Throwable ignore) { }
         }
         bound = false;
-        connected = false;
     }
 
     public int[] snapshot() { return raw; }

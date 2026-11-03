@@ -9,20 +9,105 @@
 
 ## 早上验收清单（5 分钟）
 
-1. **装最新包**：`RC2ETX-1.27.7.apk`（下面 Release 链接）。
+1. **装最新包**：`RC2ETX-1.46.44.apk`（下面 Release 链接）。
 2. **启动应看到七页签**：`原生 | 通道 | 混控 | 输出 | 校准 | 诊断 | 设置`。若一进来是全屏，点右上「退出全屏」——那是你上次点的全屏，不再是自动的。
 3. **设置页四张卡**：点「遥控器型号」应循环 `自动识别 → RC2 → RC Pro` 并弹提示；点「界面主题」应换皮肤并重启核心；点「摇杆校准」直接进校准页；点「诊断导出」跳诊断页。
 4. **校准**：校准页点「开始校准」→ 四根杆各**转圈推到顶**（不用死摁一点）→ 顶部四卡变绿「满行程 ✓」→ 全部松手回中 1.5 秒 → 自动完成。完成后到「通道」页看：CH1~CH4 应回到 0%±1%，**不应有任何通道卡在 -100%**。
 5. **摇杆卡顿**：拨动摇杆 15 秒，观察是否还有"卡住一秒再跳一下"。RST 仍在（每 3~6 秒一次），但空档已由 binder 补帧填满。
 6. **USB 手柄**：插线 → 弹窗选「游戏手柄」。**首次会弹 root 授权，必须点允许**（否则会提示"已被拒绝超级用户权限"）。之后 PC 设备管理器应出现 HID-compliant game controller。
 
+## 本轮修复（1.46.44，2026-11-03）
+
+> ⚠️ **先说结论：本版全部修复尚未经过真机验证。** 开发过程中遥控器 USB 掉线，
+> 无线 adb 也未能连上（扫描本机所在的 `192.168.3.0/24` 全网段 5555 端口无响应）。
+> 下面是改动内容，不是"已修复"。
+
+### 1. 模型管理页闪退 + 列表空白
+
+**崩溃证据**（设备端 `crash_native.txt`）：
+
+```
+signal 11 addr 0x10 pc 0xcacbf4b8 base 0xca782000 off 0x43d4b8
+signal 6  addr 0x5d3f pc 0xeb03cee0 base 0xeb004000 off 0x38ee0
+```
+
+`off 0x43d4b8` 落在 `std::__ndk1::set<unsigned int>::insert` 内，`addr 0x10` = 解引用了
+一个空的 `std::set` 内部指针（结构体偏移 0x10 处）。
+
+**两条原因，互相叠加：**
+
+1. `modelslist` 所在的一整段 1888 字节 BSS 在启动后约 70 ms 被外部清零
+   （已加 `clear()` 日志钩子，确认不是 `ModelsList::clear()` 干的）。被波及的对象包括
+   `s_anaFilt` / `modelslist` / `modelslabels` / `g_FATFS_Obj` 等。
+   → **这个写入者尚未定位**，目前只能检测 + 自愈。
+2. `ModelLabelsWindow` 构造里 `lblselector->setSelected(getLabels().size() - 1);`，
+   标签表为空时 `size()-1` 无符号下溢成 `0xFFFFFFFF`，随后在空 `std::set` 上插入 → 崩在 0x10。
+
+**修复：**
+
+- 原生侧 `model_select.cpp`：进页前若 `modelslist.size()==0` 先 `clear()+load()`；
+  标签表为空则跳过「选中第一个标签」直接返回 —— 彻底消除下溢。
+- 新增 `src/ui/etx_store_diag.cpp` 运行时探针：模型数/标签数/当前模型指针变化时打日志，
+  检测到「库空了但 SD 上有模型」就自动重建（2 秒节流）。
+
+### 2. RC Pro 六轴全 −100%、怎么动都不动
+
+**根因：整条输入链被一个判据判死。** `stickSourceAlive()` 用 `duml.connected` 判活，
+而 RC Pro 的 `40007` 是「连一次收一帧就 EOF」，这个标志几乎恒为 false，于是：
+
+- `tick()` 从不把摇杆喂进混控；
+- `fillNativeAxes()` 全走合成假值 —— 正好每轴 −100%；
+- `applyRcProButtons()` 整段不执行 —— 旁键全废。
+
+**三个加重项与修复：**
+
+| 问题 | 修复 |
+|---|---|
+| 判活判据是 `connected` 而不是「最近一帧有多新」 | 改用单调时钟 `SystemClock.elapsedRealtime()` + 新鲜度（400 ms），`d = now-last; return d>=0 && d<ms`（防下溢） |
+| `DumlStick` 快照模式重连间隔注释写 10 ms、代码是 **5000 ms** | 改 10 ms，连续失败 200 次熔断回 5 s |
+| `RcProStick.raw` 初值全 0，`(0-1024)/660` 正好 = 每轴 −100%（"载荷没解析出来"的伪装） | 初值改 1024 中位；6 通道同时为 0 判坏帧不发布 |
+
+### 3. 旁键 / 拨杆没适配（RC Plus 2）
+
+新增两条通路，与 RC2 原有那条并列：
+
+- **binder `06/174` 帧轮询**（`RcProService`）：250 ms 一次，独立回调，原始 hex 一并上报；
+- **无障碍服务**（`input/KeysService.java` + `res/xml/accessibility.xml`）：
+  `onKeyEvent` 收标准 gamepad 键码 → `EtxNative.press/release`。
+  参照包用 `canRequestFilterKeyEvents` + `flagRequestFilterKeyEvents`，缺一条都收不到 KeyEvent。
+
+**铁律（改这个别违反）：**
+
+1. `KeysService` **必须与 libetx 同进程**，绝不加 `android:process` —— 核心状态是进程内的，
+   换进程等于加载一份空核心，按了没人看见。
+2. 原生按键队列 `s_keyq` **没有锁**。若以后把 `EtxNative.tick()` 挪出主线程，必须同步加锁。
+   当前 tick 在 Java 主线程、无障碍回调也在主线程，天然串行。
+
+### 4. 构建脚本加固
+
+踩过一个坑：重链完 `libetx.so` 忘了同步到 `keep/`，`build-apk.sh` 会**静默用旧 so 出包**，
+而版本号一变，APK 的 sha 看起来"变了"，极难察觉。现在：
+
+- 每次构建打印 `keep/libetx.so` 的 mtime + sha16；
+- 若 `RC2-EdgeTX-Native/out/libetx/libetx.so` 比 `keep/libetx.so` 新，直接 `[FATAL]` 退出。
+
+### 5. 时钟混用修正
+
+`Radio.tick()` 用 `elapsedRealtime()` 判活，桥线程却把 `lastBinderMs` 写成 `currentTimeMillis()`，
+两者相减约 −1.7e12 ⇒ `binderFresh` 恒为 true（每 20 ms 空转）。已统一为 `elapsedRealtime()`。
+
 ## 支持机型
 
 | 机型 | 系统 | 摇杆来源 | 状态 |
 |---|---|---|---|
 | DJI RC2（`rc331`） | Android 11 / arm64 | DUML `127.0.0.1:40007` 持续流，约 24Hz | ✅ 主目标机型，全功能 |
-| DJI RC Pro（`rm510`） | Android 10 / 骁龙865 | DJI 私有 binder（`protocol` 服务）+ `174` 按键帧 | ⚠️ 摇杆/按键已接，HID 手柄不可用（无 root） |
+| DJI RC Pro（`rm510`） | Android 10 / 骁龙865 | DJI 私有 binder（`protocol` 服务）+ `06/174` 按键帧 | ⚠️ 摇杆/按键已接（1.46.44 修判活与旁键），HID 手柄不可用（无 root） |
+| DJI RC Plus 2 | Android 11 / arm64 | **同一套 binder**（`transact(4)`）+ 无障碍服务收物理按键 | ⚠️ 传输层已逐字节对齐，**未真机验证**；轴序/键码待上机确认 |
 | 普通手机 / 平板 | arm64 + 32位兼容 | 无物理摇杆，只能用触摸 | ⚠️ 能起核心，需 32 位 ABI 支持 |
+
+> 三台机器的按键通路**不同**：RC2 的拨杆走 DUML `06/AE` 帧；RC Pro 走 binder `06/174`；
+> RC Plus 2 的物理按键在内核里是普通输入设备事件，只有 `AccessibilityService.onKeyEvent` 拿得到。
+> 所以 App 里留了**三条独立通路**（TCP 174 → binder 174 → 无障碍服务），都只调 `EtxNative.press/release`。
 
 ## 能做什么
 
@@ -112,7 +197,7 @@ ETX_SO=/path/to/libetx.so ./scripts/build-apk.sh 1.23.0
 | 机身射频发 ELRS | 不可行：DJI 私有 SDR + 定制 ASIC，没有公开接口 |
 | 接收机改发射 | 不可行：TX/RX 固件 target 与 PA/LNA 引脚表不同 |
 | 脚本页入口 | QuickMenu 第 9 个磁贴（`APP/LUA脚本`）未创建，待查 gate 条件 |
-| 模型格空白 | `modelslist` 被 `loadYaml()` 清空后未装回，排查中 |
+| 模型管理页 | 1.46.44 已加原生防线（空表短路 + 进页前重建）与运行时自愈；**根因（1888 字节 BSS 被外部 memset 清零）尚未定位**，未真机验证 |
 | 64 位 | 需另编 aarch64 `libetx.so` 并适配 HAL，属独立排期 |
 
 ## 合规与声明
@@ -133,8 +218,12 @@ ETX_SO=/path/to/libetx.so ./scripts/build-apk.sh 1.23.0
 - [x] USB HID 手柄（250Hz）
 - [x] 自动校准 / 诊断导出 / 型号设置
 - [x] RC Pro binder 摇杆 + 174 按键
-- [ ] 可视化设置页（型号/主题/校准/导出 四张卡片）
-- [ ] 脚本页入口、模型格空白
+- [x] 可视化设置页（型号/主题/校准/导出 四张卡片）
+- [x] RC Plus 2 逆向与传输层对齐（`docs/18`）
+- [x] 物理按键无障碍服务（`KeysService`，需用户在系统里手动开启）
+- [ ] **1.46.44 全量真机验证**（模型管理页 / RC Pro 六轴 / 旁键三通路 / 无障碍注册）
+- [ ] 定位 1888 字节 BSS memset 的写入者（当前只有检测 + 自愈）
+- [ ] 脚本页入口
 - [ ] aarch64 构建
 
 ## 校准（v2，1.25.x 起）

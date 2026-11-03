@@ -211,10 +211,23 @@ public final class Radio {
      */
     public boolean stickSourceAlive() {
         if (!dumlOn) return false;
-        if (duml.connected && duml.stickFrames > 0) return true;
+        // 2026-11-03（RC Pro 修复）：判活从 connected 改成「新鲜度」。
+        // 原因：RC Pro 的 40007 是"连一次给一帧就断"的快照模式，connected 每个
+        // 连接周期只有几十毫秒为 true，其余时间 false。用它判活会让整条输入链
+        // （混控采样 / 原生轴注入 / 旁键映射）几乎永远不执行 ——
+        // 这就是「六轴全 -100% 且怎么动都不动」+「旁键不可用」的共同根因。
+        if (duml.stickFresh(STICK_FRESH_MS)) return true;
+        // binder 源同样按新鲜度判（一次 transact 失败不代表数据源死了）。
         com.rc2.etx.input.RcProStick r = rcpro;
-        return r != null && r.connected;
+        return r != null && r.fresh(STICK_FRESH_MS);
     }
+
+    /**
+     * 摇杆数据"还算活着"的时间窗（ms）。
+     * 取 400：DJI 推送最大帧间隔实测约 250ms（4Hz 最差情况），
+     * 400ms 给了 1.6 倍余量；再大就会把"真的断了"也当成活的（通道会卡住不动）。
+     */
+    private static final long STICK_FRESH_MS = 400L;
 
     public void fillNativeAxes7(int[] axes7) {
         boolean live = !forceSynthAxes && stickSourceAlive();
@@ -268,7 +281,10 @@ public final class Radio {
     }
 
     public void fillNativeAxes(int[] axes4, int[] knobs2) {
-        boolean live = dumlOn && duml.connected && duml.stickFrames > 0;
+        // 2026-11-03：与 stickSourceAlive() 统一用新鲜度判据。
+        // 原来这里是 `duml.connected && duml.stickFrames>0`，RC Pro 快照模式下
+        // 恒为 false → 原生核心拿到的是 synth 的假值（reset 后的 -1/0）→ 六轴全 -100%。
+        boolean live = !forceSynthAxes && stickSourceAlive();
         if (live) {
             // 实测：核心按 MCU 物理序 RH,RV,LV,LH 吃输入（不是 LH,LV,RV,RH）
             duml.copyRaw(rawSnap);
@@ -534,7 +550,12 @@ public final class Radio {
                                     // 注意：不能写 duml.connected / duml.lastStickMs，
                                     // 否则下一轮会被误判成 "TCP 新鲜"，binder 立刻停手，
                                     // 而且状态栏会显示已连接（实际是断的）。
-                                    lastBinderMs = now2;
+                                    // 2026-11-03 修时钟混用：now2 是 currentTimeMillis（配
+                                    // duml.lastStickMs 用），而 tick() 里判活用的是
+                                    // elapsedRealtime。两者相减约 -1.7e12，会让
+                                    // binderFresh 恒为 true（每 20ms 空转一次）。所以这里
+                                    // 单独用 elapsedRealtime 记 binder 时间戳。
+                                    lastBinderMs = SystemClock.elapsedRealtime();
                                     if (duml.stickFrames == 0) duml.stickFrames = r.frames;
                                     gapFills++;
                                     if (gapFills <= 3 || gapFills % 500 == 0) {
@@ -775,13 +796,15 @@ public final class Radio {
      * 这里把五维与返回映射成 EdgeTX 的导航键，C1..C3 映射成 P1..P3 三档开关。
      */
     private void applyRcProButtons(int[] axes7) {
-        // 2026-11-03 修正「拨杆没有适配」：
+        // 2026-11-03 修正「拨杆/旁键没有适配」：
         // ① 原来要求 duml.isSnapMode() 才生效 —— 那是 RC Pro「连一次给一帧就断」
         //    才会置位的标志；正常连着时反而是 false ⇒ 拨杆永远没反应。
         //    现在改成：只要按钮帧是新鲜的（btnAgeMs 小）就生效。
         // ② P1/P2/P3 原来只在 b2 变化的那一帧写，而且写的是 2047/0（两档），
         //    不回中到 1024 ⇒ 开关会"卡在按下的位置"。现在每帧都写，中位 1024。
         // ③ RC Pro 的挡位/拨轮其实在 binder 的 ch4/ch5（两个波轮），也接进来。
+        // ④ 按键来源增加 binder 分支（RcProService 的 06/174 轮询）：
+        //    RC Pro 上 40007 可能一条帧都不给，此时 p0/p1/p2 只能靠 binder 拿。
         int p1 = 0, p2 = 0;
         boolean btnFresh = false;
         if (duml != null && duml.btnAgeMs() <= 1500) {
@@ -789,6 +812,19 @@ public final class Radio {
             p2 = duml.btnRaw(2);
             btnFresh = true;
         }
+        // binder 旁键：只在 TCP 按钮帧不新鲜时才采用，避免两条源互相打架
+        // （TCP 有数据时它的时序更贴近真机，binder 是 250ms 轮询的抽样）。
+        com.rc2.etx.input.RcProStick rb = rcpro;
+        if (!btnFresh && rb != null && rb.btnFresh(1500)) {
+            p0b = rb.btn0;
+            p1 = rb.btn1;
+            p2 = rb.btn2;
+            btnFresh = true;
+        }
+        // 自查修正（2026-11-03）：这里原来还有一句 `else if (btnFresh && duml 新鲜) p0b = 0;`，
+        // 是错的 —— 它会在 TCP 恢复的瞬间把 binder 记下的 p0 清掉；而 getRcProP0()
+        // 在 duml 不新鲜时正好要回退读 p0b，清掉就等于丢按键。
+        // p0 的取值统一由 getRcProP0() 处理（先 duml、无则 p0b），不需要在这里维护。
 
         int nav = 0;
         if ((p1 & 0x80) != 0) nav = 0;               // ↑
@@ -806,18 +842,71 @@ public final class Radio {
             lastNav = nav;
         }
 
-        // P1/P2/P3：C1/C2/C3 三个自定义键 → 三个开关通道，每帧都写（中位 1024）
-        axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
-        axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
-        axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;    // C3 → P3
-
-        // RC Pro 的两个波轮（binder ch4=左波轮 ch5=右波轮，1024 为中位）
+        // ---- P1/P2/P3 优先级：拨轮新鲜 → 用拨轮；否则用 C1/C2/C3 按键位 ----
+        // 2026-11-03（Lead 决策口径）：只改优先级，不改数据来源。
+        // 原来是无条件先写按键位、再用（不看新鲜度的）binder 原始值覆盖，
+        // 于是「拨轮没数据」时反而把 C1/C2/C3 的按键状态冲掉 →
+        // 用户看到的就是"旁键按了没反应"。
         com.rc2.etx.input.RcProStick r = rcpro;
-        if (r != null && r.connected && r.raw != null && r.raw.length >= 6) {
+        boolean wheelFresh = (r != null && r.fresh(STICK_FRESH_MS)
+                && r.raw != null && r.raw.length >= 6);
+        // 2026-11-03 Lead 决策（定论，非 TODO）：
+        //   ch4/ch5 = RC Pro 的两只**波轮 K1/K2**（PC 端对应 LT/RT），**不是** P1/P2 三档拨杆。
+        //   依据：① RcProStick 类注释与字段口径本来就写"ch4 左波轮 / ch5 右波轮"；
+        //        ② plus2-port 已用 dex 级证据确认参照 App 把 ch4/ch5 当波轮，
+        //           见 docs/18-rcplus2-兼容分析.md 的「轴序」一节；
+        //        ③ RCPro-资料/d3 的参照实现里 6 通道同样是「四轴 + 两波轮」。
+        //   因此这里把 ch4/ch5 作为**独立 K1/K2 语义**落到 EdgeTX 的 P1/P2 输入槽位
+        //   （HAL 的 FLEX 输入只有 3 个槽：P1/P2/P3，没有第 4/5 个槽可用），
+        //   但语义与命名按 K1/K2 理解，供 PC 端映射成 LT/RT。
+        //   P3(axes7[6]) 只由 C3 决定，任何情况下都不被波轮覆盖。
+        if (wheelFresh) {
             int[] v = r.raw;
-            axes7[4] = clampAdc(v[4]);
-            axes7[5] = clampAdc(v[5]);
+            axes7[4] = clampAdc(v[4]);   // K1 = 左波轮
+            axes7[5] = clampAdc(v[5]);   // K2 = 右波轮
+        } else {
+            axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
+            axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
         }
+        axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;        // C3 → P3（永不被波轮覆盖）
+
+        // 真机对照实验（Lead 采纳的方案）：一条带时间戳+来源的日志，
+        // 与 plus2-port 的 ETXKeys 日志放在同一次 logcat 里，一次就能判定
+        // 「TCP 174 / binder 174 / 无障碍 onKeyEvent」三条通路哪条先到。
+        // 只在按键状态或来源变化时才打，静止不刷屏。
+        maybeLogBtnSource(btnFresh, wheelFresh, p1, p2);
+    }
+
+    /** 上一次按键来源日志的内容，用于"变化才打"。 */
+    private String lastBtnSrcKey = "";
+
+    /**
+     * 打印当前旁键来源与原始位图（真机对照实验用）。
+     * 输出格式刻意与 KeysService 的 ETXKeys 日志对齐，便于并排看时序。
+     */
+    private void maybeLogBtnSource(boolean btnFresh, boolean wheelFresh, int p1, int p2) {
+        String src;
+        if (!btnFresh) src = "none";
+        else if (duml != null && duml.btnAgeMs() <= 1500) src = "tcp174";
+        else src = "binder174";
+        String key = src + "/" + Integer.toHexString(p1) + "/" + Integer.toHexString(p2)
+                + "/" + (wheelFresh ? "wheel" : "noWheel");
+        if (key.equals(lastBtnSrcKey)) return;
+        lastBtnSrcKey = key;
+        Log.i(TAG, "btnSrc=" + src + " p1=0x" + Integer.toHexString(p1)
+                + " p2=0x" + Integer.toHexString(p2)
+                + " p0=0x" + Integer.toHexString(getRcProP0())
+                + " wheel=" + wheelFresh
+                + " t=" + System.currentTimeMillis());
+    }
+
+    /** binder 分支拿到的 p0（快门/返航/急停位图）；走 TCP 时由 getRcProP0() 兜底。 */
+    private int p0b = 0;
+
+    /** 当前可用的 174 载荷 p0（0 = 无）。供诊断/后续按键映射使用。 */
+    public int getRcProP0() {
+        if (duml != null && duml.btnAgeMs() <= 1500) return duml.btnRaw(0);
+        return p0b;
     }
 
 

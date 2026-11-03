@@ -16,11 +16,23 @@ PY="/c/Users/刘子墨/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python
 mkdir -p dist build
 
 # ---- 冻结 so 来源：默认注入 keep/libetx.so 基线；要试新 so 用 ETX_SO=/path/xx.so ----
+# 2026-11-03 防翻车：build.sh 把新 so 链到 RC2-EdgeTX-Native/out/libetx/libetx.so，
+# 而本脚本只认 keep/libetx.so。若重链后忘了 cp 到 keep/，就会**静默用旧 so 出包**，
+# 而版本号变化会让 APK 的 sha 看起来"变了"，极难察觉（本节 1.46.40/41/42 就踩过）。
+# 所以：① 打印 keep 的 mtime+sha；② 若 out/libetx 比 keep 新，直接报错退出。
+OUT_SO="../RC2-EdgeTX-Native/out/libetx/libetx.so"
+if [ -f "$OUT_SO" ] && [ -f keep/libetx.so ] && [ "$OUT_SO" -nt keep/libetx.so ]; then
+  echo "[FATAL] $OUT_SO 比 keep/libetx.so 新（重链后忘了同步）"
+  echo "        先执行： cp \"$OUT_SO\" keep/libetx.so app/jniLibs/armeabi-v7a/libetx.so"
+  echo "        否则打出来的包会静默使用旧 so，而版本号让 sha 看起来变了。"
+  exit 1
+fi
 SO_V7=app/jniLibs/armeabi-v7a/libetx.so
 if [ -n "$ETX_SO" ]; then
   cp "$ETX_SO" "$SO_V7"; echo "[i] 使用 ETX_SO=$ETX_SO"
 else
-  cp keep/libetx.so "$SO_V7"; echo "[i] 使用基线 keep/libetx.so"
+  cp keep/libetx.so "$SO_V7"
+  echo "[i] 使用基线 keep/libetx.so  mtime=$(stat -c %y keep/libetx.so)  sha16=$(sha256sum keep/libetx.so | cut -c1-16)"
 fi
 
 # ---- GUARD: so 未定义符号检查 ----

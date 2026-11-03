@@ -44,5 +44,22 @@
             android:process="com.dpad.fuli"
             android:exported="false" />
 
+        <!-- 物理按键采集（RC Plus 2 等走 evdev 的机型）。
+             铁律：绝对不能加 android:process —— 按键最终要调 EtxNative.press()，
+             而 libetx 的状态是进程内的，换进程等于加载一份空核心。
+             与 RcProService 的 com.dpad.fuli 白名单进程无关，两者互不影响。 -->
+        <service
+            android:name=".input.KeysService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility" />
+        </service>
+
     </application>
 </manifest>

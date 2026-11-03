@@ -433,12 +433,25 @@ public class MainActivity extends Activity implements Host {
             toast("radio.yml 解析结果已写入 radioyml.txt");
         } else if ("key".equals(act)) {
             final int k = i.getIntExtra("k", 4);
-            // 确定性投递：先按下，60ms 后松开（同帧 down+up 会被 keysPollingCycle 漏掉）
+            // hold=按下保持时长(ms)。短按 60ms；>400ms 才会被 EdgeTX 识别为 LONG_PRESS
+            // （KEY_MODEL 长按 = 模型管理 ModelLabelsWindow，见 datastructs_radio.cpp:108）
+            final int hold = Math.max(20, i.getIntExtra("hold", 60));
             com.rc2.etx.jni.EtxNative.press(k);
             view.postDelayed(new Runnable() {
                 public void run() { com.rc2.etx.jni.EtxNative.release(k); }
-            }, 60);
-            Log.i(TAG, "press " + k + " (release in 60ms)");
+            }, hold);
+            Log.i(TAG, "press " + k + " (release in " + hold + "ms)");
+        } else if ("a11y".equals(act)) {
+            // 跳系统「无障碍」设置页，让用户手动勾选本 App 的按键服务。
+            // 无障碍服务只能由用户手动开启，没有入口等于没做（plus2-port §11.3）。
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                toast("请在本列表里开启「" + getString(com.rc2.etx.R.string.app_name) + "」的按键服务");
+            } catch (Throwable e) {
+                toast("打开无障碍设置失败: " + e);
+            }
+            Log.i(TAG, "intent action=a11y");
         } else if ("card".equals(act)) {
             int ci = i.getIntExtra("i", 0);
             if (view != null) view.fireCard(ci);

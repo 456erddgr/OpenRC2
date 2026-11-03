@@ -15,6 +15,7 @@ import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 跑在 android:process="com.dpad.fuli" 里的采集进程。
@@ -22,6 +23,18 @@ import java.util.List;
  * 这个进程名是 DJI 的白名单名（实测有效）：只有用它才能从 ServiceManager 拿到
  * "protocol" 服务的 binder。拿到后按 RM510 对接包给出的常量拼 Parcel，
  * transact(4) 查询 cmdSet=6 / cmdId=4（摇杆+波轮），回调里按小端 uint16 解 6 个通道。
+ *
+ * 2026-11-03 新增「旁键（物理按键）走 binder」（修 RC Pro 旁键不可用）：
+ * 依据是 RCPro-资料/d3 的参照实现（cjz 的 RM510 键位 app，在 RC Pro 上实测可用）：
+ *   · 摇杆/波轮：transact(4) + cmdSet=6/cmdId=4  → 6×u16le
+ *   · 按键/挡位：cmdSet=6 / cmdId=174(0xAE)（参照实现每 500ms 轮一次 174）
+ * 我们在同一进程里补一条 174 轮询（默认 250ms），把载荷前 3 字节当 p0/p1/p2 上报。
+ * 这样即使 RC Pro 的 40007 一条帧都不给，旁键也能从 binder 拿到。
+ *
+ * 诚实边界：174 的**载荷布局**是从「40007 上的 06/174 帧」实测出来的
+ * （offset 11/12/13 = p0/p1/p2，见 docs/19 与 RCPro-资料/d3:857-866），
+ * 而 binder 回调拿到的 byte[] 是否与 TCP 载荷逐字节相同，**尚未真机验证**。
+ * 所以这里把原始 hex 一起回传，真机上一眼就能对照确认。
  */
 public class RcProService extends Service {
 
@@ -30,7 +43,13 @@ public class RcProService extends Service {
     public static final int MSG_REGISTER = 1;
     public static final int MSG_VALUES = 2;
     public static final int MSG_ERROR = 3;
+    /** 旁键（06/174）载荷。2026-11-03 新增。 */
+    public static final int MSG_BTN = 4;
     public static final String KEY_VALUES = "values";
+    public static final String KEY_B0 = "b0";
+    public static final String KEY_B1 = "b1";
+    public static final String KEY_B2 = "b2";
+    public static final String KEY_HEX = "hex";
 
     private static final String IFACE_PROTOCOL = "com.dji.protocol.IProtocolManager";
     private static final String IFACE_LISTENER = "com.dji.protocol.IPackListener";
@@ -40,10 +59,18 @@ public class RcProService extends Service {
             85, 1, 0, 0, 4, 2, 0, 6, -1, 0, 2, 0, 0, 6, 4, 0, 0, 0, 300, 0
     };
 
-    private volatile boolean transactBusy;
+    /**
+     * 跨线程的"binder 事务在飞"标志。
+     * 以前是普通 boolean，只够单线程用；现在有摇杆(100Hz) 和旁键(4Hz) 两条轮询线程，
+     * 必须原子化，否则两边同时 transact 会把 binder 服务端队列塞满、
+     * 表现就是"推几下整个输入卡住"（1.24.0 修过一次的同一个坑）。
+     */
+    private final AtomicBoolean inFlight = new AtomicBoolean(false);
 
     /** 轮询间隔（ms）。默认 8ms，可用 --es action bindrate --ei ms N 改；0 表示"背压自适应"。 */
     public static volatile int pollIntervalMs = 0;
+    /** 旁键轮询间隔（ms）。参照实现用 500ms；这里取 250ms 兼顾手感与开销。 */
+    public static volatile int btnPollMs = 250;
     private android.content.SharedPreferences sp;
     private static volatile long statFrom, statPolls, statSkips, statReplies, statChanges;
     private int cbLog;
@@ -52,6 +79,12 @@ public class RcProService extends Service {
     private volatile long lastAt;
     private volatile boolean running;
     private boolean okLogged, failLogged;
+    /** 旁键：最近一次载荷（用于"变了才上报"与诊断）。 */
+    private volatile String lastBtnHex = "";
+    private volatile int btnCount;
+    private boolean btnOkLogged, btnFailLogged;
+    /** 最近一次旁键三元组（重新注册的客户端要能立刻拿到当前状态）。 */
+    private final int[] lastBtn = new int[]{0, 0, 0};
 
     private int[] packWithCmd(int cmdSet, int cmdId) {
         int[] p = new int[MCU_PACK.length];
@@ -101,12 +134,60 @@ public class RcProService extends Service {
         }
     };
 
+    /**
+     * 旁键（06/174）的回调。**必须是独立 Binder**：摇杆回调是按 6×u16 解通道值的，
+     * 174 的载荷却是"位图 + 挡位"（前 3 字节 p0/p1/p2），
+     * 两条查询共用一个回调就会互相污染（把按键位当成摇杆值）。
+     */
+    private final Binder btnCallback = new Binder() {
+        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code == 0x5f4e5446) return super.onTransact(code, data, reply, flags);
+            try {
+                data.enforceInterface(IFACE_LISTENER);
+                int head = data.readInt();
+                if (head == 0) return true;
+                for (int i = 0; i < 15; i++) data.readInt();
+                int n = data.readInt();
+                if (n <= 0) return true;
+                byte[] bytes = data.createByteArray();
+                if (bytes == null || bytes.length < 3) return true;
+                int b0 = bytes[0] & 0xFF;
+                int b1 = bytes[1] & 0xFF;
+                int b2 = bytes[2] & 0xFF;
+                btnCount++;
+                // 只在前 8 字节变化时打日志（按键是事件型，静止时不变，不会刷屏）
+                StringBuilder sb = new StringBuilder();
+                for (int k = 0; k < 8 && k < bytes.length; k++) {
+                    sb.append(String.format("%02x", bytes[k] & 0xFF));
+                }
+                String hex = sb.toString();
+                boolean changed = !hex.equals(lastBtnHex);
+                lastBtnHex = hex;
+                if (btnCount <= 3 || changed) {
+                    Log.i(TAG, "btn #" + btnCount + " p0=" + b0 + " p1=" + b1 + " p2=" + b2
+                            + " len=" + bytes.length + " hex=" + hex);
+                }
+                publishBtn(b0, b1, b2, hex);
+            } catch (Throwable t) {
+                if (!btnFailLogged) {
+                    btnFailLogged = true;
+                    Log.w(TAG, "btn 回调失败: " + t);
+                }
+            }
+            return true;
+        }
+    };
+
     private final Messenger inbox = new Messenger(new Handler(Looper.getMainLooper()) {
         @Override public void handleMessage(Message msg) {
             if (msg.what == MSG_REGISTER && msg.replyTo != null) {
                 synchronized (clients) { clients.add(msg.replyTo); }
                 int[] v = lastValues;
                 if (v != null) sendTo(msg.replyTo, v);
+                if (lastBtnHex.length() > 0) {
+                    sendBtnTo(msg.replyTo, lastBtn[0], lastBtn[1], lastBtn[2], lastBtnHex);
+                }
             }
         }
     });
@@ -127,6 +208,26 @@ public class RcProService extends Service {
         } catch (Throwable ignore) { }
     }
 
+    private void publishBtn(int b0, int b1, int b2, String hex) {
+        lastBtn[0] = b0; lastBtn[1] = b1; lastBtn[2] = b2;
+        Messenger[] snapshot;
+        synchronized (clients) { snapshot = clients.toArray(new Messenger[0]); }
+        for (Messenger m : snapshot) sendBtnTo(m, b0, b1, b2, hex);
+    }
+
+    private void sendBtnTo(Messenger m, int b0, int b1, int b2, String hex) {
+        try {
+            Bundle b = new Bundle();
+            b.putInt(KEY_B0, b0);
+            b.putInt(KEY_B1, b1);
+            b.putInt(KEY_B2, b2);
+            b.putString(KEY_HEX, hex);
+            Message out = Message.obtain(null, MSG_BTN);
+            out.obj = b;
+            m.send(out);
+        } catch (Throwable ignore) { }
+    }
+
     private void publishError(String s) {
         if (failLogged) return;
         failLogged = true;
@@ -142,12 +243,8 @@ public class RcProService extends Service {
         }
     }
 
-    private void pollOnce() {
-        // 审计修复：重入保护必须放在最前面。以前写在 try 里，早退时 finally 仍会把
-        // transactBusy 清成 false —— 等于把**另一个线程**的锁放掉，双份 transact 又回来了。
-        statPolls++;
-        if (transactBusy) { statSkips++; return; }
-        transactBusy = true;
+    /** 一次 transact(4)。cmdSet/cmdId 决定服务端返回什么包；cb 决定用哪个回调解。 */
+    private boolean transactOnce(int cmdSet, int cmdId, Binder cb) {
         Parcel data = Parcel.obtain();
         Parcel reply = Parcel.obtain();
         try {
@@ -155,30 +252,63 @@ public class RcProService extends Service {
             Object o = sm.getMethod("getService", String.class).invoke(null, "protocol");
             if (o == null) {
                 publishError("getService(\"protocol\") = null（进程名可能不在白名单）");
-                return;
+                return false;
             }
-            // 防重入：轮询定时器与重连线程可能同时进来，binder 服务端是单队列，
-            // 并发 transact 会把队列塞满，表现就是"推几下就卡住不动"。
             IBinder binder = (IBinder) o;
             data.writeInterfaceToken(IFACE_PROTOCOL);
             data.writeInt(1);
-            int[] pack = packWithCmd(6, 4);
+            int[] pack = packWithCmd(cmdSet, cmdId);
             for (int v : pack) data.writeInt(v);
-            data.writeStrongBinder(callback);
+            data.writeStrongBinder(cb);
             boolean ok = binder.transact(4, data, reply, 0);
             if (!ok) {
                 publishError("transact(4) 返回 false");
-                return;
+                return false;
             }
             reply.readException();
-            if (!okLogged) { okLogged = true; Log.i(TAG, "protocol 轮询已建立"); }
+            return true;
         } catch (Throwable t) {
             Throwable c = t.getCause() != null ? t.getCause() : t;
             publishError(c.getClass().getSimpleName() + ": " + c.getMessage());
+            return false;
         } finally {
-            transactBusy = false;
             try { data.recycle(); } catch (Throwable ignore) { }
             try { reply.recycle(); } catch (Throwable ignore) { }
+        }
+    }
+
+    private void pollOnce() {
+        // 审计修复：重入保护必须放在最前面。以前写在 try 里，早退时 finally 仍会把
+        // transactBusy 清成 false —— 等于把**另一个线程**的锁放掉，双份 transact 又回来了。
+        // 2026-11-03：改成 AtomicBoolean.compareAndSet，跨线程也安全（旁键线程共用同一个闸门）。
+        statPolls++;
+        if (!inFlight.compareAndSet(false, true)) { statSkips++; return; }
+        try {
+            // 防重入：轮询定时器与重连线程可能同时进来，binder 服务端是单队列，
+            // 并发 transact 会把队列塞满，表现就是"推几下就卡住不动"。
+            if (transactOnce(6, 4, callback) && !okLogged) {
+                okLogged = true;
+                Log.i(TAG, "protocol 轮询已建立");
+            }
+        } finally {
+            inFlight.set(false);
+        }
+    }
+
+    /**
+     * 旁键轮询：cmdSet=6 / cmdId=174(0xAE) = BUTTON_PHY_STATUS。
+     * 参照实现（RCPro-资料/d3 的 mcuPoll(6,174)）也是这么拉的。
+     * 抢不到闸门就直接跳过这一拍，绝不阻塞摇杆那条 100Hz 的线程。
+     */
+    private void pollBtnOnce() {
+        if (!inFlight.compareAndSet(false, true)) return;
+        try {
+            if (transactOnce(6, 174, btnCallback) && !btnOkLogged) {
+                btnOkLogged = true;
+                Log.i(TAG, "旁键(06/174) 轮询已建立");
+            }
+        } finally {
+            inFlight.set(false);
         }
     }
 
@@ -207,7 +337,8 @@ public class RcProService extends Service {
                                     + " replyHz=" + (statReplies * 1000 / (now - statFrom))
                                     + " changeHz=" + (statChanges * 1000 / (now - statFrom))
                                     + " skip=" + statSkips + " poll=" + statPolls
-                                    + " iv=" + pollIntervalMs);
+                                    + " iv=" + pollIntervalMs
+                                    + " btn=" + btnCount);
                             int iv = sp.getInt("rcproPollMs", pollIntervalMs);
                             pollIntervalMs = iv;
                             statFrom = now; statPolls = 0; statSkips = 0; statReplies = 0; statChanges = 0;
@@ -220,6 +351,23 @@ public class RcProService extends Service {
         }, "etx-rcpro-poll");
         t.setDaemon(true);
         t.start();
+
+        // 旁键轮询线程：低频（250ms）即可，按键不会有 100Hz 需求，
+        // 但每多占一次 binder 就少给摇杆一帧，所以刻意压低频率。
+        Thread bt = new Thread(new Runnable() {
+            public void run() {
+                while (running) {
+                    try {
+                        pollBtnOnce();
+                        Thread.sleep(btnPollMs);
+                    } catch (Throwable t) {
+                        try { Thread.sleep(500); } catch (InterruptedException ignore) { }
+                    }
+                }
+            }
+        }, "etx-rcpro-btn");
+        bt.setDaemon(true);
+        bt.start();
     }
 
     @Override public void onDestroy() { running = false; super.onDestroy(); }

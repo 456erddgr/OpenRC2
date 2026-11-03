@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  遥控器物理按键采集（com.rc2.etx.input.KeysService）。
+
+  口径照抄参照包 local.plus2.xbox 的 res/xml/accessibility.xml（RC Plus 2 实测可用）：
+    · canRequestFilterKeyEvents="true" + flagRequestFilterKeyEvents
+      —— 缺任何一条都收不到 KeyEvent，onKeyEvent 永远不触发。
+    · typeWindowStateChanged 只是为了满足系统对事件类型的最低要求，
+      我们实际不使用窗口事件（onAccessibilityEvent 是空实现）。
+    · notificationTimeout=100 与参照包一致。
+
+  刻意不写 android:description：
+  该属性要求必须是 @string 引用（写字面量会被 aapt2 link 拒绝：
+  "is incompatible with attribute description (attr) reference"），
+  而加 @string 就要动公共的 res/values/strings.xml。
+  省掉它能让本功能只新增 2 个文件，不碰任何共享文件；
+  服务在无障碍列表里显示的名字来自 manifest 里 <service> 的 android:label，不受影响。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:accessibilityFlags="flagRequestFilterKeyEvents"
+    android:canRequestFilterKeyEvents="true" />

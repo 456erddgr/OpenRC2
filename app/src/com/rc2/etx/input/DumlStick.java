@@ -46,6 +46,12 @@ public final class DumlStick {
     /** 只统计摇杆帧的速率（真机约 9–10Hz，比总帧率有意义）。 */
     public volatile int stickHz;
     public volatile long lastFrameMs;
+    /**
+     * 最近一帧摇杆数据的 **elapsedRealtime()** 时间戳（单调、含休眠）。
+     * 与上面的 lastFrameMs(墙上时钟) 并存：lastFrameMs 只用于给人看的日志/诊断，
+     * 所有"是否新鲜"的判断一律用这个 elapsed 版本（理由见 stickFresh() 的注释）。
+     */
+    public volatile long lastStickElapsed;
     public volatile long lastStickMs;
     public volatile String lastHex = "";
     public volatile String err = "-";
@@ -148,12 +154,23 @@ public final class DumlStick {
         int failStreak = 0;
         while (run && gen == myGen) {
             Socket s = null;
+            // 本连接的建立时刻（0 = 这次没连上）。2026-11-03 修 RC Pro「连一次给一帧就断」：
+            // 用「连接存活了多久 + 收到几帧」来区分两种 daemon：
+            //   · RC2：一条长连接持续推 9~10Hz，存活 3~6 秒后偶发 RST → 存活时长 >= 500ms
+            //   · RC Pro：连上立刻吐一份快照就 close，存活只有几十 ms、每连接 1 帧
+            // 以前只用「最近 1500ms 有过帧」判快照模式，RC2 的 RST 也会命中 →
+            // 会把一台正常机器错判成快照机（再叠加 5s 退避，等于把 9Hz 打成 0.2Hz）。
+            long connectAt = 0;
+            // 本连接收到的帧数基线。原来 markFrames 只声明在 try 里，
+            // 出了 try 就取不到 —— 现在提到外面，供快照模式判定使用。
+            final long frameMark = frames;
             try {
                 s = new Socket();
                 sock = s;
                 s.connect(new InetSocketAddress("127.0.0.1", PORT), 2000);
                 s.setTcpNoDelay(true);
                 s.setSoTimeout(30);
+                connectAt = System.currentTimeMillis();
                 connected = true;
                 err = "-";
                 failStreak = 0;
@@ -161,7 +178,6 @@ public final class DumlStick {
                 InputStream in = s.getInputStream();
                 java.io.OutputStream out = s.getOutputStream();
                 have = 0;
-                final long markFrames = frames;
                 long lastHb = 0;
                 while (run && gen == myGen) {
                     int n;
@@ -186,7 +202,7 @@ public final class DumlStick {
                     }
                     if (n < 0) {
                         Log.w(TAG, "read returned " + n + " (EOF/reset) after "
-                                + (frames - markFrames) + " frames");
+                                + (frames - frameMark) + " frames");
                         break;                  // 对端关闭
                     }
                     if (n == 0) continue;
@@ -212,16 +228,35 @@ public final class DumlStick {
             if (!run || gen != myGen) break;
             failStreak++;
             reconnects++;
-            // 退避重连：1s/2s/4s/8s（上限 8s）。不给 dji_link 的客户端配额造成压力，
-            // 也不像原来的"1s 固定 + 看门狗 4s/8s/16s/30s"那样两套退避互相打架。
-            // RC Pro：连上立刻 EOF 且收到过帧 → 快照模式，10ms 内重连继续取下一帧。
-            if (failStreak == 1 && frames > 0 && (System.currentTimeMillis() - lastFrameMs) < 1500) {
+            // ---- 快照模式判定（2026-11-03，RC Pro 修复）----
+            // 判据：这次连接「活得很短」(<500ms) 且「确实收到了帧」。
+            //   RC Pro: 连通 → 一包快照 → FIN/RST，典型存活 <100ms。
+            //   RC2   : 长连接持续推帧，只在 3~6s 处偶发 RST，存活 >= 3000ms。
+            // 500ms 这条线把两者干净分开，不会再把 RC2 误判成快照机。
+            long livedMs = (connectAt == 0) ? 0 : (System.currentTimeMillis() - connectAt);
+            long gotFrames = frames - frameMark;
+            if (gotFrames > 0 && livedMs < SNAP_LIVE_MS) {
+                if (!snapMode) Log.i(TAG, "检测到快照模式（存活 " + livedMs + "ms，"
+                        + gotFrames + " 帧/连接）→ 改为高频重连");
                 snapMode = true;
+                snapBurst++;
+            } else if (gotFrames > 0 && snapMode) {
+                // 出现了一条"活得久、还持续给帧"的连接 → 说明这机器其实是推送式，
+                // 立刻退出快照模式，避免把正常机器一直按 10ms 高频连（很吃 CPU/binder）。
+                Log.i(TAG, "退出快照模式（存活 " + livedMs + "ms，恢复推送式连法）");
+                snapMode = false;
+                snapBurst = 0;
             }
-            // 槽位回收要 5s：连不上时按 5s/5s/10s/20s/30s 退避（上限 30s）。
-            // 原来 10ms 的快照模式会让"秒关"变成死循环，等于拿不到任何数据。
+            // 退避策略：
+            //   · 快照模式：daemon 每次连接只 dump 一份，必须"立刻"再连才能拿到下一帧；
+            //     原来这里固定 5000ms（注释还写着 10ms），等于 0.2Hz，
+            //     下游 duml.connected 绝大部分时间是 false → RC Pro 全轴 -100%。
+            //     改成 10ms；但连续失败 200 次说明这次不是快照而是真断了，退回 5s，
+            //     免得空转占 CPU（设备只有 1.79GB RAM）。
+            //   · 非快照模式：保持原来的 5s/5s/10s/20s/30s，RC2 行为不变。
             long wait;
-            if (snapMode && frames > 0) wait = 5000L;
+            if (snapMode && gotFrames > 0 && snapBurst < 200) wait = 10L;
+            else if (snapMode && snapBurst >= 200) wait = 5000L;
             else if (failStreak <= 2) wait = 5000L;
             else wait = Math.min(5000L << Math.min(failStreak - 2, 3), 30000L);
             try {
@@ -333,6 +368,8 @@ public final class DumlStick {
             stickFrames++;
             stickHzCount++;
             lastStickMs = System.currentTimeMillis();
+            // 新鲜度判断专用时间戳（单调、含休眠）。见 stickFresh() 注释。
+            lastStickElapsed = android.os.SystemClock.elapsedRealtime();
             long gap = lastFrameAtMs == 0 ? 0 : lastStickMs - lastFrameAtMs;
             lastFrameAtMs = lastStickMs;
             if (gap > maxGapMs) maxGapMs = gap;
@@ -378,6 +415,47 @@ public final class DumlStick {
     private volatile long btnMs;
     /** RC Pro 的 40007 是"连一次给一帧就断"的快照模式，检测到就改用快速重连。 */
     private volatile boolean snapMode;
+    /**
+     * 判"快照模式"的连接存活门限（ms）。
+     * RC Pro 的快照连接典型存活 20~80ms；RC2 的推送连接能活 3~6 秒才被 RST。
+     * 500ms 落在两者之间，用来把两种 daemon 干净分开（判错会把 RC2 打成 0.2Hz）。
+     */
+    private static final long SNAP_LIVE_MS = 500L;
+    /** 快照模式下连续成功重连的次数（>=200 说明不是快照而是快照端也没数据，退回慢速）。 */
+    private volatile int snapBurst;
+
+    /**
+     * 摇杆数据是否"新鲜"：最近 ms 毫秒内收到过真正的摇杆帧。
+     *
+     * 为什么不能用 connected：RC Pro 的快照模式下 connected 在每个连接周期里
+     * 只有几十毫秒是 true，其余时间都是 false —— 用它判活会让整条输入链
+     * （混控采样 / 原生轴注入 / 旁键映射）几乎永远不执行，表现就是
+     * 「六轴全 -100% 且怎么动都不动」。改成按"最近一帧的时间"判活。
+     *
+     * 时间源选择（2026-11-03，Lead 指定必须写明）：
+     *   用 SystemClock.elapsedRealtime()，**不用** currentTimeMillis()，也**不用** uptimeMillis()：
+     *   · currentTimeMillis 会被系统对时/NTP 跳变（挂机几小时后可能一次跳几秒到几分钟），
+     *     一旦向前跳，`now - last` 变成大正数 → 误判"源已死" → 回到假 -100%；
+     *     一旦向后跳，`now - last` 变成负数 → 负数恒小于 ms → 永远"新鲜" → 断线也看不出来。
+     *   · uptimeMillis 在深度休眠时停走：设备锁屏放一夜，醒来后 uptime 只走了几分钟而
+     *     elapsedRealtime 走了几小时，用 uptime 会让"真实已经过去很久"看起来像刚收到帧。
+     *   · elapsedRealtime 含休眠时间且单调，是唯一同时满足"不被对时影响"和"不因休眠走慢"的时钟。
+     *
+     * 判据写法带下溢保护：`d >= 0 && d < ms`。
+     * 即使两个时间源被意外混用（例如别人把 lastStickElapsed 写成 currentTimeMillis），
+     * 负差值也只会判"不新鲜"，而不会像 `d < ms` 那样恒为 true 把死源当活源。
+     */
+    public boolean stickFresh(long ms) {
+        long last = lastStickElapsed;
+        if (last <= 0) return false;
+        long d = android.os.SystemClock.elapsedRealtime() - last;
+        return d >= 0 && d < ms;
+    }
+
+    /** 诊断用：当前是否处于快照模式、快照重连计数。 */
+    public String snapInfo() {
+        return "snap=" + snapMode + " burst=" + snapBurst + " live<" + SNAP_LIVE_MS + "ms";
+    }
 
     public int btnRaw(int i) { return i == 0 ? b0 : (i == 1 ? b1 : b2); }
     public long btnAgeMs() { return System.currentTimeMillis() - btnMs; }
