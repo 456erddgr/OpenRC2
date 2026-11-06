@@ -669,6 +669,76 @@ public class MainActivity extends Activity implements Host {
                     .putInt("rcproPollMs", ms).apply();
             com.rc2.etx.input.RcProService.pollIntervalMs = ms;
             Log.i(TAG, "intent action=bindrate ms=" + ms);
+        } else if ("bindscan".equals(act)) {
+            // 探针：扫描 cmdSet/cmdId 组合，找出真正能返回「非 1024 真实数据」的那一组。
+            // 用法：--es action bindscan [--ei cs 6 --ei from 0 --ei to 40]
+            // 结果打在 logcat 的 ETXRcProScan 里，每行一个 id 的返回长度与前 24 字节。
+            final int cs = i.getIntExtra("cs", 6);
+            final int from = i.getIntExtra("from", 0);
+            final int to = i.getIntExtra("to", 40);
+            Log.i(TAG, "intent action=bindscan cs=" + cs + " ids=" + from + ".." + to);
+            // 必须丢到后台线程：ensureRcPro() 里会走 RcProStick.available()/bindService，
+            // 在主线程调用会直接卡住（第一次实测时 logcat 只打出 intent 那一行就没了）。
+            new Thread(new Runnable() { public void run() {
+                try {
+                    radio.ensureRcPro();
+                    for (int w = 0; w < 80; w++) {
+                        com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                        if (r != null && r.isBound()) break;
+                        Thread.sleep(100);
+                    }
+                    com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                    Log.i(TAG, "bindscan: ref=" + r + " bound=" + (r != null && r.isBound()));
+                    boolean ok = r != null && r.requestScan(cs, from, to);
+                    Log.i(TAG, "bindscan queued=" + ok);
+                } catch (Throwable t) {
+                    Log.e(TAG, "bindscan 异常: " + t, t);
+                }
+            } }, "etx-bindscan-req").start();
+        } else if ("bindraw".equals(act)) {
+            // 探针：把某个 cmdId 的原始返回字节全打出来（含 15 个 int 头），用于对布局。
+            // 用法：--es action bindraw --ei cs 6 --ei id 4 --ei n 8
+            final int cs = i.getIntExtra("cs", 6);
+            final int id = i.getIntExtra("id", 4);
+            final int n = i.getIntExtra("n", 8);
+            Log.i(TAG, "intent action=bindraw cs=" + cs + " id=" + id + " n=" + n);
+            new Thread(new Runnable() { public void run() {
+                try {
+                    radio.ensureRcPro();
+                    for (int w = 0; w < 80; w++) {
+                        com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                        if (r != null && r.isBound()) break;
+                        Thread.sleep(100);
+                    }
+                    com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                    boolean ok = r != null && r.requestRaw(cs, id, n);
+                    Log.i(TAG, "bindraw queued=" + ok);
+                } catch (Throwable t) {
+                    Log.e(TAG, "bindraw 异常: " + t, t);
+                }
+            } }, "etx-bindraw-req").start();
+        } else if ("bindlisten".equals(act)) {
+            // 探针：只注册一次回调然后静默等 sec 秒，看服务端会不会自己推数据。
+            // 用法：--es action bindlisten [--ei cs 6 --ei id 4 --ei sec 30]
+            final int cs = i.getIntExtra("cs", 6);
+            final int id = i.getIntExtra("id", 4);
+            final int sec = i.getIntExtra("sec", 30);
+            Log.i(TAG, "intent action=bindlisten cs=" + cs + " id=" + id + " sec=" + sec);
+            new Thread(new Runnable() { public void run() {
+                try {
+                    radio.ensureRcPro();
+                    for (int w = 0; w < 80; w++) {
+                        com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                        if (r != null && r.isBound()) break;
+                        Thread.sleep(100);
+                    }
+                    com.rc2.etx.input.RcProStick r = radio.rcproRef();
+                    boolean ok = r != null && r.requestListen(cs, id, sec);
+                    Log.i(TAG, "bindlisten queued=" + ok);
+                } catch (Throwable t) {
+                    Log.e(TAG, "bindlisten 异常: " + t, t);
+                }
+            } }, "etx-bindlisten-req").start();
         } else if ("vbat".equals(act)) {
             // 自测预警音：--es action vbat --ei mv 3000（低于 radio.yml 的电池警告阈值即触发）
             int mv = i.getIntExtra("mv", 3000);

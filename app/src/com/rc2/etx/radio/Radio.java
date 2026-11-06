@@ -47,6 +47,12 @@ public final class Radio {
     private Thread hidThread;
     /** RC Pro(RM510) 的 binder 摇杆源；非空时由 rcBridge 把值搬进 duml.raw。 */
     private com.rc2.etx.input.RcProStick rcpro;
+
+    /** 探针用：把 RC Pro 采集器暴露出去（主进程拿不到 protocol binder，必须经它转发）。 */
+    public com.rc2.etx.input.RcProStick rcproRef() { return rcpro; }
+
+    /** 探针：确保 RC Pro 采集器已启动（扫描/raw 之前要先把它拉起来）。 */
+    public void ensureRcPro() { startRcProIfAny(); }
     private Thread rcBridge;
     private int gapFills;
 

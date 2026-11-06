@@ -45,6 +45,17 @@ public class RcProService extends Service {
     public static final int MSG_ERROR = 3;
     /** 旁键（06/174）载荷。2026-11-03 新增。 */
     public static final int MSG_BTN = 4;
+    /** 主进程请求服务进程执行一次 cmdId 扫描（探针用）。 */
+    public static final int MSG_SCAN = 5;
+    public static final int MSG_RAW = 6;
+    /** 只注册一次回调然后静默等推送（验证"我们是不是在打断订阅"）。 */
+    public static final int MSG_LISTEN = 7;
+    public static final String KEY_SEC = "sec";
+    public static final String KEY_CS = "cs";
+    public static final String KEY_FROM = "from";
+    public static final String KEY_TO = "to";
+    public static final String KEY_ID = "id";
+    public static final String KEY_N = "n";
     public static final String KEY_VALUES = "values";
     public static final String KEY_B0 = "b0";
     public static final String KEY_B1 = "b1";
@@ -102,10 +113,13 @@ public class RcProService extends Service {
                 data.enforceInterface(IFACE_LISTENER);
                 int head = data.readInt();
                 if (head == 0) return true;
-                for (int i = 0; i < 15; i++) data.readInt();
+                // 头部的 15 个 int 里有 cmd_set / cmd_id / 返回长度，扫描模式下要原样留证。
+                int[] hdr = new int[15];
+                for (int i = 0; i < 15; i++) hdr[i] = data.readInt();
                 int n = data.readInt();
                 if (n <= 0) return true;
                 byte[] bytes = data.createByteArray();
+                if (scanner != null && bytes != null) scanner.onReply(hdr, bytes);
                 if (bytes == null || bytes.length < 12) return true;
                 int[] vals = new int[6];
                 for (int k = 0; k < 6; k++) {
@@ -188,6 +202,21 @@ public class RcProService extends Service {
                 if (lastBtnHex.length() > 0) {
                     sendBtnTo(msg.replyTo, lastBtn[0], lastBtn[1], lastBtn[2], lastBtnHex);
                 }
+            } else if (msg.what == MSG_SCAN) {
+                Bundle b = msg.getData();
+                int cs = b.getInt(KEY_CS, 6), from = b.getInt(KEY_FROM, 0), to = b.getInt(KEY_TO, 40);
+                Log.i(TAG_SCAN, "MSG_SCAN received cs=" + cs + " " + from + ".." + to);
+                startScan(null, cs, from, to);
+            } else if (msg.what == MSG_LISTEN) {
+                Bundle b = msg.getData();
+                int cs = b.getInt(KEY_CS, 6), id = b.getInt(KEY_ID, 4), sec = b.getInt(KEY_SEC, 30);
+                Log.i(TAG_SCAN, "MSG_LISTEN cs=" + cs + " id=" + id + " sec=" + sec);
+                startListen(cs, id, sec);
+            } else if (msg.what == MSG_RAW) {
+                Bundle b = msg.getData();
+                int cs = b.getInt(KEY_CS, 6), id = b.getInt(KEY_ID, 4), n = b.getInt(KEY_N, 8);
+                Log.i(TAG_SCAN, "MSG_RAW received cs=" + cs + " id=" + id + " n=" + n);
+                startRawDump(null, cs, id, n);
             }
         }
     });
@@ -282,6 +311,7 @@ public class RcProService extends Service {
         // transactBusy 清成 false —— 等于把**另一个线程**的锁放掉，双份 transact 又回来了。
         // 2026-11-03：改成 AtomicBoolean.compareAndSet，跨线程也安全（旁键线程共用同一个闸门）。
         statPolls++;
+        if (paused) { statSkips++; return; }
         if (!inFlight.compareAndSet(false, true)) { statSkips++; return; }
         try {
             // 防重入：轮询定时器与重连线程可能同时进来，binder 服务端是单队列，
@@ -301,6 +331,7 @@ public class RcProService extends Service {
      * 抢不到闸门就直接跳过这一拍，绝不阻塞摇杆那条 100Hz 的线程。
      */
     private void pollBtnOnce() {
+        if (paused) return;
         if (!inFlight.compareAndSet(false, true)) return;
         try {
             if (transactOnce(6, 174, btnCallback) && !btnOkLogged) {
@@ -315,6 +346,7 @@ public class RcProService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         running = true;
+        inst = this;
         sp = getSharedPreferences("etx", 0);
         pollIntervalMs = sp.getInt("rcproPollMs", pollIntervalMs);
         Thread t = new Thread(new Runnable() {
@@ -370,7 +402,234 @@ public class RcProService extends Service {
         bt.start();
     }
 
-    @Override public void onDestroy() { running = false; super.onDestroy(); }
+    @Override public void onDestroy() { running = false; if (inst == this) inst = null; super.onDestroy(); }
 
     @Override public IBinder onBind(Intent intent) { return inbox.getBinder(); }
+
+    // ================= 探针：cmdId 扫描 / 原始载荷导出 =================
+    //
+    // 目的：找出「哪一组 cmdSet/cmdId 能让固件把真实摇杆值推上来」。
+    // 现状（2026-11-06 实测）：cmdSet=6/cmdId=4 能 60Hz 轮询成功、回调也进，
+    // 但 6 个通道恒为 1024 —— 说明这个 id 只回"中点占位"，真值在别的 id 里。
+    // 扫描器把每个 id 的回包长度 + 前若干字节打出来，一眼能看出哪个 id 回了变化的数据。
+
+    /** 当前扫描器；null = 未在扫描。callback 每次回包都会喂给它。 */
+    private static volatile Scan scanner;
+
+    /**
+     * 扫描/raw 期间暂停主轮询。
+     * 原因：transact(4) 每次都会把「回包回调」注册成传入的那个 Binder ——
+     * 主轮询 60Hz 不停地拿 `callback` 重新注册，扫描器的 `scanCb` 刚注册上就被顶掉，
+     * 于是回包永远进不到 scanner 里（第一次跑扫描时就是这么静默失败的）。
+     */
+    private static volatile boolean paused;
+
+    /** 当前活着的实例（扫描器是静态方法，需要一个 binder 回调去接回包）。 */
+    private static volatile RcProService inst;
+
+    /** 扫描专用的回包 Binder：只把 (hdr, body) 交给 scanner，不做任何状态更新。 */
+    private static final Binder scanCb = new Binder() {
+        @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags)
+                throws RemoteException {
+            if (code == 0x5f4e5446) return super.onTransact(code, data, reply, flags);
+            try {
+                data.enforceInterface(IFACE_LISTENER);
+                int head = data.readInt();
+                if (head == 0) return true;
+                int[] hdr = new int[15];
+                for (int i = 0; i < 15; i++) hdr[i] = data.readInt();
+                int n = data.readInt();
+                if (n <= 0) return true;
+                byte[] body = data.createByteArray();
+                Scan sc = scanner;
+                if (sc != null && body != null) sc.onReply(hdr, body);
+            } catch (Throwable ignore) { }
+            return true;
+        }
+    };
+
+    private static final String TAG_SCAN = "ETXRcProScan";
+
+    private interface Scan { void onReply(int[] hdr, byte[] body); }
+
+    /** 扫描：对 cmdSet 下 [from,to] 的每个 cmdId 各发一次，把回包打出来。 */
+    public static void startScan(final android.content.Context ctx,
+                                 final int cmdSet, final int from, final int to) {
+        runOnBinderThread("scan", new Runnable() {
+            public void run() {
+                IBinder binder = getProtocolBinder();
+                if (binder == null) { Log.e(TAG_SCAN, "getService(protocol) = null"); return; }
+                paused = true;
+                try {
+                  for (int id = from; id <= to; id++) {
+                    scanOne(binder, cmdSet, id);
+                    try { Thread.sleep(60); } catch (InterruptedException ignore) { }
+                  }
+                } finally { paused = false; }
+                scanner = null;
+                Log.i(TAG_SCAN, "scan done cs=" + cmdSet + " ids=" + from + ".." + to);
+            }
+        });
+    }
+
+    /** 对单个 id 发一次，并等最多 300ms 收一个回包。 */
+    private static void scanOne(IBinder binder, final int cmdSet, int cmdId) {
+        final String[] got = new String[1];
+        final int[] hdrGot = new int[1];
+        scanner = new Scan() {
+            public void onReply(int[] hdr, byte[] body) {
+                if (got[0] != null) return;
+                hdrGot[0] = 1;
+                got[0] = hex(body, 64);
+            }
+        };
+        try {
+            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+            data.writeInterfaceToken(IFACE_PROTOCOL);
+            data.writeInt(1);
+            int[] pack = packOf(cmdSet, cmdId);
+            for (int v : pack) data.writeInt(v);
+            data.writeStrongBinder(scanCb);
+            boolean ok = binder.transact(4, data, reply, 0);
+            data.recycle(); reply.recycle();
+            long t0 = System.currentTimeMillis();
+            while (got[0] == null && System.currentTimeMillis() - t0 < 300) {
+                try { Thread.sleep(10); } catch (InterruptedException ignore) { }
+            }
+            Log.i(TAG_SCAN, String.format("cs=%d id=%3d ok=%s waited=%s body=%s",
+                    cmdSet, cmdId, ok, hdrGot[0] == 1 ? "reply" : "none",
+                    got[0] == null ? "-" : got[0]));
+        } catch (Throwable t) {
+            Log.e(TAG_SCAN, "cs=" + cmdSet + " id=" + cmdId + " ex=" + t);
+        } finally {
+            scanner = null;
+        }
+    }
+
+    /**
+     * 「只注册一次，然后闭嘴等」—— 验证我们是不是自己打断了服务端的推送订阅。
+     *
+     * 动机：主轮询每 16ms 就 transact(4) 一次，而 transact(4) 每次都会重新注册
+     * IPackListener。如果固件把「注册」当成「重置订阅」，那么服务端永远只会回
+     * 初始占位值（我们观察到的 6×1024），真实采样则永远不会推过来。
+     *
+     * 这个探针只发一次 transact(4)，之后完全静默 sec 秒，只统计回调次数与变化次数：
+     *   · 如果回调持续在涨      → 订阅是活的，我们之前确实在打断它 → 改主轮询节流即可
+     *   · 如果只有一次性回调    → 服务端本来就不推，得另找推流入口
+     */
+    public static void startListen(final int cmdSet, final int cmdId, final int sec) {
+        runOnBinderThread("listen", new Runnable() {
+            public void run() {
+                IBinder binder = getProtocolBinder();
+                if (binder == null) { Log.e(TAG_SCAN, "LISTEN: getService(protocol)=null"); return; }
+                paused = true;
+                final int[] n = new int[1];
+                final int[] changes = new int[1];
+                final String[] last = new String[1];
+                scanner = new Scan() {
+                    public void onReply(int[] hdr, byte[] body) {
+                        n[0]++;
+                        String h = hex(body, 32);
+                        if (last[0] == null) last[0] = h;
+                        else if (!last[0].equals(h)) { changes[0]++; last[0] = h; }
+                    }
+                };
+                try {
+                    Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                    data.writeInterfaceToken(IFACE_PROTOCOL);
+                    data.writeInt(1);
+                    for (int v : packOf(cmdSet, cmdId)) data.writeInt(v);
+                    data.writeStrongBinder(scanCb);
+                    binder.transact(4, data, reply, 0);
+                    data.recycle(); reply.recycle();
+                    Log.i(TAG_SCAN, "LISTEN registered, now silent for " + sec + "s");
+                    long t0 = System.currentTimeMillis();
+                    while (System.currentTimeMillis() - t0 < sec * 1000L) {
+                        Thread.sleep(1000);
+                        Log.i(TAG_SCAN, "LISTEN t=" + ((System.currentTimeMillis() - t0) / 1000)
+                                + "s replies=" + n[0] + " changes=" + changes[0]
+                                + " last=" + (last[0] == null ? "-" : last[0]));
+                    }
+                } catch (Throwable t) {
+                    Log.e(TAG_SCAN, "LISTEN ex=" + t);
+                } finally {
+                    paused = false;
+                    scanner = null;
+                }
+                Log.i(TAG_SCAN, "LISTEN done total=" + n[0] + " changes=" + changes[0]);
+            }
+        });
+    }
+
+    /** 原始导出：同一个 id 连发 n 次，把每次的回包完整打出来（找可变字段用）。 */
+    public static void startRawDump(final android.content.Context ctx,
+                                    final int cmdSet, final int cmdId, final int n) {
+        runOnBinderThread("raw", new Runnable() {
+            public void run() {
+                IBinder binder = getProtocolBinder();
+                if (binder == null) { Log.e(TAG_SCAN, "getService(protocol) = null"); return; }
+                paused = true;
+                final int[] cnt = new int[1];
+                scanner = new Scan() {
+                    public void onReply(int[] hdr, byte[] body) {
+                        cnt[0]++;
+                        Log.i(TAG_SCAN, "raw#" + cnt[0] + " hdr=" + join(hdr)
+                                + " len=" + body.length + " body=" + hex(body, 200));
+                    }
+                };
+                try {
+                for (int k = 0; k < n; k++) {
+                    try {
+                        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+                        data.writeInterfaceToken(IFACE_PROTOCOL);
+                        data.writeInt(1);
+                        for (int v : packOf(cmdSet, cmdId)) data.writeInt(v);
+                        data.writeStrongBinder(scanCb);
+                        binder.transact(4, data, reply, 0);
+                        data.recycle(); reply.recycle();
+                    } catch (Throwable t) {
+                        Log.e(TAG_SCAN, "raw ex=" + t);
+                    }
+                    try { Thread.sleep(120); } catch (InterruptedException ignore) { }
+                }
+                } finally { paused = false; }
+                scanner = null;
+                Log.i(TAG_SCAN, "raw done cs=" + cmdSet + " id=" + cmdId + " replies=" + cnt[0]);
+            }
+        });
+    }
+
+    private static void runOnBinderThread(String name, final Runnable r) {
+        Thread t = new Thread(r, "etx-bind-" + name);
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static IBinder getProtocolBinder() {
+        try {
+            Class<?> sm = Class.forName("android.os.ServiceManager");
+            return (IBinder) sm.getMethod("getService", String.class).invoke(null, "protocol");
+        } catch (Throwable t) { return null; }
+    }
+
+    private static int[] packOf(int cmdSet, int cmdId) {
+        int[] p = new int[MCU_PACK.length];
+        System.arraycopy(MCU_PACK, 0, p, 0, MCU_PACK.length);
+        p[13] = cmdSet;
+        p[14] = cmdId;
+        return p;
+    }
+
+    private static String hex(byte[] b, int max) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < b.length && i < max; i++) sb.append(String.format("%02x", b[i] & 0xFF));
+        if (b.length > max) sb.append("..(").append(b.length).append("B)");
+        return sb.toString();
+    }
+
+    private static String join(int[] a) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < a.length; i++) sb.append(i == 0 ? "" : ",").append(a[i]);
+        return sb.append(']').toString();
+    }
 }

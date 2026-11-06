@@ -43,6 +43,15 @@ public final class DumlStick {
     public volatile long badFrames;
     public volatile long crcFail;
     public volatile int hz;
+    /**
+     * DUML 帧序号追踪（2026-11-06 新增）。
+     * 用途：判断「10Hz 是源的上限，还是我们漏收了」。
+     * 服务端每发一帧 seq 就 ++，如果 seq 的跳量远大于我们收到的帧数，
+     * 说明中间被丢了（配额/背压/我们自己解析慢），而不是源只有 10Hz。
+     */
+    public volatile int lastSeq = -1;
+    public volatile long seqGapSum = 0;     // 累计跳号量
+    public volatile long seqGapFrames = 0;  // 发生了跳号的次数
     /** 只统计摇杆帧的速率（真机约 9–10Hz，比总帧率有意义）。 */
     public volatile int stickHz;
     public volatile long lastFrameMs;
@@ -331,6 +340,21 @@ public final class DumlStick {
             badFrames++;
             return;
         }
+        // seq 在载荷偏移 4..5（小端）。只在摇杆帧上统计，避免被别的帧型搅乱。
+        {
+            // 载荷布局：snd|rcv|seq(2,LE)|attr|cmd_set|cmd_id|...
+            // 即 seq 在载荷偏移 2..3（= b[off+4..off+5]），不是 6..7。
+            int seqNow = (b[off + 4] & 0xFF) | ((b[off + 5] & 0xFF) << 8);
+            int cs0 = b[off + 9] & 0xFF, ci0 = b[off + 10] & 0xFF;
+            if (cs0 == 0x06 && ci0 == 0xAE) {
+                int last = lastSeq;
+                if (last >= 0) {
+                    int d = (seqNow - last) & 0xFFFF;
+                    if (d > 1) { seqGapSum += (d - 1); seqGapFrames++; }
+                }
+                lastSeq = seqNow;
+            }
+        }
         int cmdSet = b[off + 9] & 0xFF;
         int cmdId = b[off + 10] & 0xFF;
         String key = String.format("%02X/%02X", cmdSet, cmdId);
@@ -390,7 +414,8 @@ public final class DumlStick {
             hzFrom = now;
             hzCount = 0;
             stickHzCount = 0;
-            Log.i(TAG, "stat hz=" + hz + " stickHz=" + stickHz + " stick=" + stickFrames + " frames=" + frames + " bad=" + badFrames + " gap150=" + gapOver150);
+            Log.i(TAG, "stat hz=" + hz + " stickHz=" + stickHz + " stick=" + stickFrames + " frames=" + frames + " bad=" + badFrames + " gap150=" + gapOver150
+                    + " seq=" + lastSeq + " lost=" + seqGapSum + " gapN=" + seqGapFrames);
         }
     }
 

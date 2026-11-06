@@ -111,6 +111,55 @@ public final class RcProStick {
         }
     });
 
+    /** 服务是否已连上（探针要等它才能在服务进程里跑扫描）。 */
+    public boolean isBound() { return remote != null && bound; }
+
+    /** 探针：让服务进程执行一次 cmdId 扫描（主进程拿不到 protocol binder）。 */
+    public boolean requestScan(int cs, int from, int to) {
+        return sendCmd(RcProService.MSG_SCAN, cs, from, 0, to);
+    }
+
+    /** 探针：只注册一次回调，静默 sec 秒等推送。 */
+    public boolean requestListen(int cs, int id, int sec) {
+        if (remote == null) { Log.w(TAG, "requestListen: 服务未连接"); return false; }
+        try {
+            Message m = Message.obtain(null, RcProService.MSG_LISTEN);
+            Bundle b = new Bundle();
+            b.putInt(RcProService.KEY_CS, cs);
+            b.putInt(RcProService.KEY_ID, id);
+            b.putInt(RcProService.KEY_SEC, sec);
+            m.setData(b);
+            remote.send(m);
+            Log.i(TAG, "requestListen cs=" + cs + " id=" + id + " sec=" + sec);
+            return true;
+        } catch (Throwable t) { Log.e(TAG, "requestListen 失败: " + t); return false; }
+    }
+
+    /** 探针：让服务进程对某个 id 连发 n 次并打印原始载荷。 */
+    public boolean requestRaw(int cs, int id, int n) {
+        return sendCmd(RcProService.MSG_RAW, cs, id, n, 0);
+    }
+
+    private boolean sendCmd(int what, int cs, int a, int n, int to) {
+        if (remote == null) { Log.w(TAG, "sendCmd: 服务未连接"); return false; }
+        try {
+            Message m = Message.obtain(null, what);
+            Bundle b = new Bundle();
+            b.putInt(RcProService.KEY_CS, cs);
+            b.putInt(RcProService.KEY_FROM, a);
+            b.putInt(RcProService.KEY_TO, to);
+            b.putInt(RcProService.KEY_ID, a);
+            b.putInt(RcProService.KEY_N, n);
+            m.setData(b);
+            remote.send(m);
+            Log.i(TAG, "sendCmd what=" + what + " cs=" + cs + " a=" + a + " n=" + n + " to=" + to);
+            return true;
+        } catch (Throwable t) {
+            Log.e(TAG, "sendCmd 失败: " + t);
+            return false;
+        }
+    }
+
     private final ServiceConnection conn = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName n, IBinder b) {
             remote = new Messenger(b);
