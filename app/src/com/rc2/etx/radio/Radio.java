@@ -270,11 +270,13 @@ public final class Radio {
                 axes7[4] = potOrMin(rawSnap[4]); // P1
                 axes7[5] = potOrMin(rawSnap[5]); // P2
             }
-            axes7[6] = 0;                       // P3（无硬件）→ CH7 = -100%
-            applyRcProButtons(axes7);
-            // 2026-11-03：摇杆以外的通道（旋钮/拨杆）不能停在 0。
-            // 之前 P1/P2 未接线时是 0，EdgeTX 的 switch 通道会读到 -1024（= -100%），
-            // 这正是用户说的「打开就全负 100%」。改成中位 1024。
+            // 2026-11-06 修「四个开关一直 −100%」：
+            // 原来 axes7[6] 写死 0（注释"无硬件"），potOrMin 也把没接的轴压到 0，
+            // 而 EdgeTX 把 0 解释成 −1024（= −100%）。没有对应硬件的通道一律给中位 1024。
+            axes7[6] = 1024;                    // P3：无硬件 → 中位 0%
+            // 2026-11-06：按键/档位必须**无条件**处理 —— 它们来自 06/AE 帧里的
+            // [7][8][9]，跟摇杆值是否"新鲜"无关。原来放在 if(live) 里，
+            // 摇杆一断档按键就全哑了。
         } else {
             axes7[0] = synthAdc(input.lx);   // LH  (yaw)
             axes7[1] = synthAdc(input.ly);   // LV  (throttle)
@@ -284,7 +286,17 @@ public final class Radio {
             axes7[5] = synthAdc(input.knob2);
             axes7[6] = 1024;
         }
+        // 按键/档位：不管是 live 还是 synth 都处理一次
+        applyRcProButtons(axes7);
+        // 诊断：每秒打一次 axes7 全量，看 P1/P2/P3 到底是多少
+        if ((++ax7dbg % 100) == 0) {
+            Log.i(TAG, "AX7 " + axes7[0] + "," + axes7[1] + "," + axes7[2] + ","
+                    + axes7[3] + " | P1=" + axes7[4] + " P2=" + axes7[5] + " P3=" + axes7[6]
+                    + " | k=" + (duml != null ? (duml.btnK1 + "/" + duml.btnK2 + "/" + duml.btnK3) : "?")
+                    + " wheelFresh=" + (rcpro != null && rcpro.fresh(STICK_FRESH_MS)));
+        }
     }
+    private int ax7dbg;
 
     public void fillNativeAxes(int[] axes4, int[] knobs2) {
         // 2026-11-03：与 stickSourceAlive() 统一用新鲜度判据。
@@ -354,7 +366,9 @@ public final class Radio {
      *  所以「恒在中点」的通道按 0（最低档）输出；真接了旋钮（RC Pro 的波轮走
      *  binder ch4/ch5）时由 applyRcProButtons() 覆盖成真实值。*/
     private int potOrMin(int djiRaw) {
-        if (djiRaw <= 0 || Math.abs(djiRaw - 1024) <= DJI_CENTER_DEAD) return 0;
+        // 2026-11-06 修：原来中位/无效一律返回 0，而 EdgeTX 把 0 当 −1024（−100%），
+        // 于是「没接旋钮的通道全 −100%」。中位应该返回 1024（0%）。
+        if (djiRaw <= 0 || Math.abs(djiRaw - 1024) <= DJI_CENTER_DEAD) return 1024;
         return djiToEtxAdc(djiRaw);
     }
 
@@ -711,6 +725,30 @@ public final class Radio {
                 input.touch(8, sv[4]);
                 input.touch(9, sv[5]);
             }
+            // ===== 2026-11-06 修「四个开关一直 −100%」=====
+            // 真正的原因：通道页的数值来自 mixer.compute(input)，读的是 input.aux1..aux4，
+            // 而全代码里**从来没有** input.touch(4..7) —— aux 一直是 reset 的 -1f，
+            // mixer 就把它算成 −1024 → 显示 −100%。
+            // 这里直接按 06/AE 的按键位写 aux（不走 touch，避免被摇杆校准污染）。
+            if (input != null && duml != null) {
+                int gk3 = duml.btnK3;
+                int gear = com.rc2.etx.input.DumlStick.gearPos(gk3);
+                // 用户口径（2026-11-06）：N 档 = +100%，C 档 = −100%
+                // 实测 k3：S=0x00 / N=0x01(默认) / C=0x02
+                input.aux1 = (gear == 2) ? -1f : (gear == 1 ? 1f : 0f);   // C/N/S → -1/+1/0
+                input.aux2 = com.rc2.etx.input.DumlStick.c1Pressed(gk3) ? 1f : -1f;
+                input.aux3 = com.rc2.etx.input.DumlStick.c2Pressed(gk3) ? 1f : -1f;
+                input.aux4 = com.rc2.etx.input.DumlStick.shotPressed(duml.btnK1) ? 1f : -1f;
+                // 2026-11-06：拍照键原本占 AUX4，但用户说「拍照键和 AUX4 变得一样了」，
+                // 说明那个位置更该给别的东西。拍照已经有独立通道 CH12(SW_SHOT)，
+                // 所以 AUX4 改成「录像键」，与 CH11 一致，不再和拍照重复。
+                input.aux4 = com.rc2.etx.input.DumlStick.recPressed(duml.btnK2) ? 1f : -1f;
+                // 独立开关源：S / C / 录像 / 拍照（两态，+1=有效，-1=无效）
+                input.swS  = (gear == 0) ? 1f : -1f;
+                input.swC  = (gear == 2) ? 1f : -1f;
+                input.swRec   = com.rc2.etx.input.DumlStick.recPressed(duml.btnK2) ? 1f : -1f;
+                input.swShot  = com.rc2.etx.input.DumlStick.shotPressed(duml.btnK1) ? 1f : -1f;
+            }
             if (now - lastStickFrameAt > STICK_WD_MS) {
                 // 只提示"该重连了"，真正的退避与重连由 DumlStick 单线程自己负责
                 // （原来这里另有一套 4s/8s/16s/30s 退避，和 socket 层的 1s 退避互相打架，
@@ -792,6 +830,19 @@ public final class Radio {
     /** 上一次的五维/返回按键状态，用于边沿检测（避免按住不停发键）。 */
     private int lastNav = -1;
     private int keysSent;
+    /** 06/AE 按键位图的上一次状态（用于边沿检测）。 */
+    private boolean lastShot, lastRec;
+    /** 上一次打印的按键状态串（变化才打日志）。 */
+    private String lastKeyState = "";
+    /** 拍照 / 录像映射到的 EdgeTX 按键索引（见 native kKeyMap：0=UP..9=TELE）。 */
+    private static final int PROBE_KEY_SHOT = 9;   // 暂用 TELE
+    private static final int PROBE_KEY_REC = 8;    // 暂用 MODEL
+    /**
+     * 2026-11-06：物理按键是否注入 EdgeTX 按键事件。
+     * 默认 **false** —— 用户的物理键只当通道用（CH05..CH14），
+     * 不能让它们触发 EdgeTX 自己的界面（通道查看/模型设置/滑块拖动）。
+     */
+    private static final boolean ENABLE_KEY_INJECT = false;
     private int lastBtn2 = -1;
 
     /**
@@ -801,7 +852,37 @@ public final class Radio {
      *   p2 bit0-1 挡位(S/N/C) / 0x04 C1 / 0x08 C2 / 0x10 C3 / 0x20 返回
      * 这里把五维与返回映射成 EdgeTX 的导航键，C1..C3 映射成 P1..P3 三档开关。
      */
+    /**
+     * 2026-11-06 新增：把 06/AE 的按键位图直接翻译成 AUX1..AUX4。
+     *
+     * 为什么单独开一个方法：AUX 通道由 NativePanel 的 sw[] 驱动，
+     * 而 sw[] 读的是 input.aux1..4。原来给 aux 赋值的 applyRcProButtons()
+     * 只挂在 fillNativeAxes7() 上，但实际调用的是 fillNativeAxes(4 轴)，
+     * 所以按键从来没生效过。这里由 NativePanel 每帧主动调用，
+     * 不依赖"哪条分支被执行"这种假设。
+     *
+     * 映射（单键实测，docs/24）：
+     *   AUX1 = 调档键：S→-1 / H→0 / C→+1
+     *   AUX2 = C1（后面自定义键1）
+     *   AUX3 = C2（后面自定义键2）
+     *   AUX4 = 拍照键
+     */
+    public void syncAuxFromKeys() {
+        if (input == null || duml == null) return;
+        int k1 = duml.btnK1, k3 = duml.btnK3;
+        int gear = com.rc2.etx.input.DumlStick.gearPos(k3);
+        input.aux1 = (gear == 2) ? -1f : (gear == 1 ? 1f : 0f);   // C/N/S → -1/+1/0
+        input.aux2 = com.rc2.etx.input.DumlStick.c1Pressed(k3) ? 1f : -1f;
+        input.aux3 = com.rc2.etx.input.DumlStick.c2Pressed(k3) ? 1f : -1f;
+        input.aux4 = com.rc2.etx.input.DumlStick.shotPressed(k1) ? 1f : -1f;
+    }
+
+    private int kbcalls;
     private void applyRcProButtons(int[] axes7) {
+        if (duml != null && (++kbcalls % 200) == 0) {
+            Log.i(TAG, "APPLY#" + kbcalls + " k=" + duml.btnK1 + "/" + duml.btnK2 + "/" + duml.btnK3
+                    + " axes6=" + axes7[6]);
+        }
         // 2026-11-03 修正「拨杆/旁键没有适配」：
         // ① 原来要求 duml.isSnapMode() 才生效 —— 那是 RC Pro「连一次给一帧就断」
         //    才会置位的标志；正常连着时反而是 false ⇒ 拨杆永远没反应。
@@ -832,20 +913,27 @@ public final class Radio {
         // 在 duml 不新鲜时正好要回退读 p0b，清掉就等于丢按键。
         // p0 的取值统一由 getRcProP0() 处理（先 duml、无则 p0b），不需要在这里维护。
 
-        int nav = 0;
-        if ((p1 & 0x80) != 0) nav = 0;               // ↑
-        else if ((p1 & 0x40) != 0) nav = 1;          // ↓
-        else if ((p1 & 0x20) != 0) nav = 2;          // ←
-        else if ((p1 & 0x10) != 0) nav = 3;          // →
-        else if ((p1 & 0x08) != 0) nav = 4;          // 中 = ENT
-        else if ((p2 & 0x20) != 0) nav = 5;          // 返回 = RTN
-        if (btnFresh && nav != lastNav) {
-            try {
-                com.rc2.etx.jni.EtxNative.press(nav);
-                keysSent++;
-            } catch (Throwable ignore) {
+        // ===== 2026-11-06：物理按键不再注入 EdgeTX 按键事件 =====
+        // 用户反馈：按拍照键会触发 EdgeTX 的「通道查看」、按录像键会跳到「模型设置」、
+        // 拨旋钮会被当成在拖 UI 滑块 —— 因为这里把物理键翻译成了 EdgeTX 的导航/功能键。
+        // 用户的要求是「这些按钮就只是通道」，所以整段注入默认关闭，只保留通道值。
+        // 想恢复把 ENABLE_KEY_INJECT 改成 true。
+        if (ENABLE_KEY_INJECT) {
+            int nav = 0;
+            if ((p1 & 0x80) != 0) nav = 0;               // ↑
+            else if ((p1 & 0x40) != 0) nav = 1;          // ↓
+            else if ((p1 & 0x20) != 0) nav = 2;          // ←
+            else if ((p1 & 0x10) != 0) nav = 3;          // →
+            else if ((p1 & 0x08) != 0) nav = 4;          // 中 = ENT
+            else if ((p2 & 0x20) != 0) nav = 5;          // 返回 = RTN
+            if (btnFresh && nav != lastNav) {
+                try {
+                    com.rc2.etx.jni.EtxNative.press(nav);
+                    keysSent++;
+                } catch (Throwable ignore) {
+                }
+                lastNav = nav;
             }
-            lastNav = nav;
         }
 
         // ---- P1/P2/P3 优先级：拨轮新鲜 → 用拨轮；否则用 C1/C2/C3 按键位 ----
@@ -874,7 +962,80 @@ public final class Radio {
             axes7[4] = ((p2 & 0x04) != 0) ? 2047 : 0;    // C1 → P1
             axes7[5] = ((p2 & 0x08) != 0) ? 2047 : 0;    // C2 → P2
         }
-        axes7[6] = ((p2 & 0x10) != 0) ? 2047 : 0;        // C3 → P3（永不被波轮覆盖）
+
+        // ================= 06/AE 按键位图 → 通道（2026-11-06 单键实测，docs/24）=================
+        // 每个键都是单独测出来的（弹窗→一直按同一个键→看位值）：
+        //   C1（后面自定义键1）  k3 位 0x04
+        //   C2（后面自定义键2）  k3 位 0x08
+        //   拍照键               k1 位 0x40
+        //   录像键               k2 位 0x01
+        //   调档键 k3 低两位：0x00=S, 0x01=H, 0x02=C
+        //
+        // 落成通道的规则：离散按键按下 = 2047(+100%)，松开 = 0(−100%)。
+        // P3 给「调档键」—— 它是三档，用 S/H/C 三个值才有意义。
+        int kk1 = (duml != null) ? duml.btnK1 : 0;
+        int kk2 = (duml != null) ? duml.btnK2 : 0;
+        int kk3 = (duml != null) ? duml.btnK3 : 1;
+
+        boolean c1 = com.rc2.etx.input.DumlStick.c1Pressed(kk3);
+        boolean c2 = com.rc2.etx.input.DumlStick.c2Pressed(kk3);
+        boolean shot = com.rc2.etx.input.DumlStick.shotPressed(kk1);
+        boolean rec = com.rc2.etx.input.DumlStick.recPressed(kk2);
+
+        // P3 承载调档键：S=0 / H=1024 / C=2047（三档刚好铺满）
+        int gear = com.rc2.etx.input.DumlStick.gearPos(kk3);
+        axes7[6] = (gear == 0) ? 0 : (gear == 2) ? 2047 : 1024;
+
+        // P1/P2 在没有拨轮时优先给 C1/C2 —— 这两个是最常用的自定义键
+        if (!wheelFresh) {
+            axes7[4] = c1 ? 2047 : 0;
+            axes7[5] = c2 ? 2047 : 0;
+        }
+
+        // 拍照 / 录像：2026-11-06 起**不再注入 EdgeTX 按键**（用户要求"只是通道"）。
+        // 它们已经有独立通道：SRC_SW_SHOT / SRC_SW_REC，见 Mixer.defaultConfig()。
+        // 需要恢复注入时把 ENABLE_KEY_INJECT 设 true。
+        if (ENABLE_KEY_INJECT) {
+            if (shot && !lastShot) {
+                try { com.rc2.etx.jni.EtxNative.press(PROBE_KEY_SHOT); keysSent++; } catch (Throwable ignore) { }
+            } else if (!shot && lastShot) {
+                try { com.rc2.etx.jni.EtxNative.release(PROBE_KEY_SHOT); } catch (Throwable ignore) { }
+            }
+            if (rec && !lastRec) {
+                try { com.rc2.etx.jni.EtxNative.press(PROBE_KEY_REC); keysSent++; } catch (Throwable ignore) { }
+            } else if (!rec && lastRec) {
+                try { com.rc2.etx.jni.EtxNative.release(PROBE_KEY_REC); } catch (Throwable ignore) { }
+            }
+        }
+        lastShot = shot;
+        lastRec = rec;
+
+        // ===== 2026-11-06：把真实按键/档位写进 input 状态，供 NativePanel 的 sw[] 使用 =====
+        // 用户反馈「通道还是识别不到，那四个开关一直 −100%」。
+        // 根因：NativePanel 的 sw[0..3] 来自 radio.input.aux1..aux4，
+        // 而 ini/reset 时它们是 -1f → swPos(-1)=0（上档）→ EdgeTX 显示 −100%。
+        // 那不是"故障"，是根本没人给 AUX 赋值。这里把实测到的三个来源接进去：
+        //   AUX1 = 调档键（S/H/C 三档 → -1 / 0 / +1）
+        //   AUX2 = C1
+        //   AUX3 = C2
+        if (input != null) {
+            switch (gear) {
+                case 0:  input.aux1 = -1f; break;   // S 档
+                case 2:  input.aux1 =  1f; break;   // C 档
+                default: input.aux1 =  0f; break;   // H 档（中）
+            }
+            input.aux2 = c1 ? 1f : -1f;
+            input.aux3 = c2 ? 1f : -1f;
+        }
+
+        // 状态变化时打一条，方便真机核对（静止不刷屏）
+        String st = "c1=" + (c1 ? 1 : 0) + " c2=" + (c2 ? 1 : 0)
+                + " shot=" + (shot ? 1 : 0) + " rec=" + (rec ? 1 : 0)
+                + " gear=" + com.rc2.etx.input.DumlStick.gearName(kk3);
+        if (!st.equals(lastKeyState)) {
+            lastKeyState = st;
+            Log.i(TAG, "KEYS " + st + "  (k1=" + kk1 + " k2=" + kk2 + " k3=" + kk3 + ")");
+        }
 
         // 真机对照实验（Lead 采纳的方案）：一条带时间戳+来源的日志，
         // 与 plus2-port 的 ETXKeys 日志放在同一次 logcat 里，一次就能判定

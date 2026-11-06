@@ -36,7 +36,12 @@ public final class Mixer {
         }
         c[8] = new ChannelConfig(ChannelConfig.SRC_KNOB1, "旋钮1");
         c[9] = new ChannelConfig(ChannelConfig.SRC_KNOB2, "旋钮2");
-        for (int i = 10; i < CH_COUNT; i++) {
+        // 2026-11-06：物理按键/档位的独立通道（用户要求"这些按钮为通道"）
+        c[10] = new ChannelConfig(ChannelConfig.SRC_SW_REC, "录像键");
+        c[11] = new ChannelConfig(ChannelConfig.SRC_SW_SHOT, "拍照键");
+        c[12] = new ChannelConfig(ChannelConfig.SRC_SW_S, "调档S");
+        c[13] = new ChannelConfig(ChannelConfig.SRC_SW_C, "调档C");
+        for (int i = 14; i < CH_COUNT; i++) {
             c[i] = new ChannelConfig(ChannelConfig.SRC_NONE, "CH" + (i + 1));
         }
         return c;
@@ -62,6 +67,11 @@ public final class Mixer {
             case ChannelConfig.SRC_AUX4: return in.aux4;
             case ChannelConfig.SRC_KNOB1: return in.knob1;
             case ChannelConfig.SRC_KNOB2: return in.knob2;
+            // 2026-11-06 新增的物理按键开关源
+            case ChannelConfig.SRC_SW_S: return in.swS;
+            case ChannelConfig.SRC_SW_C: return in.swC;
+            case ChannelConfig.SRC_SW_REC: return in.swRec;
+            case ChannelConfig.SRC_SW_SHOT: return in.swShot;
             default: return 0f;
         }
     }

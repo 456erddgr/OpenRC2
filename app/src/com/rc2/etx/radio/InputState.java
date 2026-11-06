@@ -10,6 +10,8 @@ public final class InputState {
     public volatile float lx, ly, rx, ry;
     public volatile float aux1, aux2, aux3, aux4;
     public volatile float knob1, knob2;
+    // 2026-11-06：物理按键/档位的独立开关源（不走 touch/校准，直接由 Radio 每帧写）
+    public volatile float swS, swC, swRec, swShot;
     public volatile long lastInputMs;
     public volatile String lastSource = "-";
     /** 校准器（可为空）。非空时所有输入先喂给校准器记录原始值，再按校准曲线映射。 */

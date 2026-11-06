@@ -739,6 +739,31 @@ public class MainActivity extends Activity implements Host {
                     Log.e(TAG, "bindlisten 异常: " + t, t);
                 }
             } }, "etx-bindlisten-req").start();
+        } else if ("rawreset".equals(act)) {
+            // 清空原始帧缓冲，准备抓一段干净的窗口
+            radio.duml.rawReset();
+            radio.duml.sampleReset();
+            Log.i(TAG, "intent action=rawreset (缓冲已清)");
+            toast("已清空，开始抓取");
+        } else if ("rawdump".equals(act)) {
+            // 导出原始帧缓冲到 raw.txt
+            final String r = radio.duml.rawDump();
+            final String s2 = radio.duml.dumpSamples();
+            // 同时把"当前瞬间"的按键位直接打在最上面，避免被累积的历史值混淆
+            String now = "NOW k=" + radio.duml.btnK1 + "/" + radio.duml.btnK2 + "/" + radio.duml.btnK3
+                    + "  names=" + com.rc2.etx.input.DumlStick.decodeKeys(
+                        radio.duml.btnK1, radio.duml.btnK2, radio.duml.btnK3) + NL;
+            Log.i(TAG, "RAWD-REPORT" + NL + r);
+            String path = writeReport("raw.txt", now + r + NL + "---- 采样 ----" + NL + s2);
+            Log.i(TAG, "rawdump -> " + path);
+            toast("原始帧已导出 raw.txt");
+        } else if ("key1".equals(act)) {
+            // 单键测试：弹窗问「要开始吗」→ 用户点开始 → 采 15 秒 → 出该键的专属报告。
+            // 用法：--es action key1 --es name "C1" [--ei sec 15]
+            final String nm = i.getStringExtra("name");
+            final int sec = i.getIntExtra("sec", 15);
+            Log.i(TAG, "intent action=key1 name=" + nm + " sec=" + sec);
+            askStartKeyTest(nm == null ? "这个键" : nm, sec);
         } else if ("vbat".equals(act)) {
             // 自测预警音：--es action vbat --ei mv 3000（低于 radio.yml 的电池警告阈值即触发）
             int mv = i.getIntExtra("mv", 3000);
@@ -807,6 +832,53 @@ public class MainActivity extends Activity implements Host {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < a.length; i++) sb.append(i == 0 ? "" : ",").append(a[i]);
         return sb.append(']').toString();
+    }
+
+    /**
+     * 单键测试：弹窗问「要开始吗」，用户点「开始」后采 sec 秒，
+     * 期间用户一直按同一个键；结束后把「这段时间里出现过的所有按键位值」列出来。
+     *
+     * 这是用户要求的交互方式：一次只测一个键、先问再开始、不混淆。
+     */
+    private void askStartKeyTest(final String keyName, final int sec) {
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("测试「" + keyName + "」")
+                .setMessage("点「开始」后，请一直按这一个键不要停。" + NL
+                        + "采集 " + sec + " 秒，期间别碰其他键。")
+                .setPositiveButton("开始", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) { runKeyOne(keyName, sec); }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void runKeyOne(final String keyName, final int sec) {
+        radio.duml.keyRecStart();         // 开始记录按键位组合
+        final android.app.AlertDialog d2 = new android.app.AlertDialog.Builder(this)
+                .setTitle("正在采集「" + keyName + "」")
+                .setCancelable(false)
+                .create();
+        d2.show();
+        final android.os.Handler h = new android.os.Handler(getMainLooper());
+        h.post(new Runnable() {
+            int left = sec;
+            public void run() {
+                if (left <= 0) {
+                    final String rep = "==== 单键测试：" + keyName + " ====" + NL
+                            + "按键位组合（出现次数）：" + NL + radio.duml.keyRecStop();
+                    Log.i(TAG, "KEY1-REPORT[" + keyName + "]" + NL + rep);
+                    writeReport("key1_" + keyName + ".txt", rep);
+                    try { d2.dismiss(); } catch (Throwable ignore) { }
+                    toast("「" + keyName + "」采集完成");
+                    return;
+                }
+                try {
+                    d2.setMessage("一直按「" + keyName + "」不要停" + NL + NL + "剩余 " + left + " 秒");
+                } catch (Throwable ignore) { }
+                left--;
+                h.postDelayed(this, 1000);
+            }
+        });
     }
 
     private void runSelfTest() {

@@ -71,30 +71,79 @@ public final class DumlStick {
     // ---- 按键位图（2026-11-06 实测解出，见 docs/23）----
     /** 06/AE 载荷 [7][8][9] 三个位图字节。静止时 k1=0 k2=0 k3=1。 */
     public volatile int btnK1 = 0, btnK2 = 0, btnK3 = 1;
+    /** 观测到的所有按键位组合 -> 出现次数（单键测试用）。 */
+    public final java.util.LinkedHashMap<String, Integer> keySeen =
+            new java.util.LinkedHashMap<String, Integer>();
+    /** 记录按键位组合（每次都调，由 probeStart/probeStop 圈定窗口）。 */
+    private volatile boolean keyRec;
+    public void keyRecStart() { synchronized (keySeen) { keySeen.clear(); } keyRec = true; }
+    public String keyRecStop() {
+        keyRec = false;
+        StringBuilder sb = new StringBuilder();
+        synchronized (keySeen) {
+            for (java.util.Map.Entry<String, Integer> e : keySeen.entrySet())
+                sb.append("  ").append(e.getKey()).append("  x").append(e.getValue()).append((char) 10);
+        }
+        return sb.length() == 0 ? "(没采到任何按键位)" : sb.toString();
+    }
     /** 位图变化次数（诊断用）。 */
     public volatile int btnChanges;
+    /** 上一条记录进 rawLog 的载荷签名（去重）。 */
+    private String lastRawSig = "";
 
-    /**
-     * 是否有「真按键」。
-     * k3 的 0x01 是常驻有效位、0x02 是拨轮中位常驻值，都要掩掉；
-     * 实测真键：k3=0x04 后自定义B / 0x08 拍照 / k1=0x40 或 k2=0x01 录像。
-     */
+    // ================== 按键位图完整映射（2026-11-06 单键实测，docs/24）==================
+    // 每个键都是用「单键测试」单独测出来的：弹窗→用户一直按同一个键→看 k1/k2/k3 取值。
+    //
+    //   C1（后面自定义键1）  k3 = 0x05  (基线 0x01 | 0x04)   → 位 0x04
+    //   C2（后面自定义键2）  k3 = 0x09  (基线 0x01 | 0x08)   → 位 0x08
+    //   拍照键               k1 = 0x40                        → 位 0x40
+    //   录像键               k2 = 0x01                        → 位 0x01
+    //   调档键 S 档          k3 = 0x00
+    //   调档键 H 档（默认）  k3 = 0x01
+    //   调档键 C 档          k3 = 0x02
+    //
+    // 注意 k3 的低两位是**调档键的档位编码**，不是"常驻位"：
+    //   0x00=S, 0x01=H, 0x02=C，拨档时整个低两位一起替换。
+    // 所以判断 C1/C2 时要先减掉档位值（见 c1Pressed/c2Pressed）。
+
+    /** C1（后面自定义键1）是否按下。 */
+    public static boolean c1Pressed(int k3) { return (k3 & 0x04) != 0; }
+    /** C2（后面自定义键2）是否按下。 */
+    public static boolean c2Pressed(int k3) { return (k3 & 0x08) != 0; }
+    /** 拍照键是否按下（k1 的 0x40）。 */
+    public static boolean shotPressed(int k1) { return (k1 & 0x40) != 0; }
+    /** 录像键是否按下（k2 的 0x01）。 */
+    public static boolean recPressed(int k2) { return (k2 & 0x01) != 0; }
+
+    /** 调档键档位：0=S, 1=H, 2=C；其他值返回 -1。 */
+    public static int gearPos(int k3) {
+        int g = k3 & 0x03;
+        return (g == 0 || g == 1 || g == 2) ? g : -1;
+    }
+    /** 档位名。 */
+    public static String gearName(int k3) {
+        switch (gearPos(k3)) {
+            case 0: return "S";
+            case 1: return "H";
+            case 2: return "C";
+            default: return "?";
+        }
+    }
+
+    /** 是否有任何按键被按下（不含调档键档位）。 */
     public static boolean hasKey(int k1, int k2, int k3) {
-        return (k1 & 0x40) != 0 || (k2 & 0x01) != 0 || (k3 & 0xFC) != 0;
+        return shotPressed(k1) || recPressed(k2) || c1Pressed(k3) || c2Pressed(k3);
     }
 
     /** 把三个位图字节翻成人能读的键名。 */
     public static String decodeKeys(int k1, int k2, int k3) {
         StringBuilder sb = new StringBuilder();
-        if ((k1 & 0x40) != 0) sb.append("录像(k1.40), ");
-        if ((k2 & 0x01) != 0) sb.append("录像(k2.01), ");
-        int low = k3 & 0xFC;                  // 掩掉常驻 0x01 / 0x02
-        if ((low & 0x04) != 0) sb.append("后自定义B, ");
-        if ((low & 0x08) != 0) sb.append("拍照, ");
-        if ((low & 0x10) != 0) sb.append("后自定义A?, ");
-        if ((low & 0x20) != 0) sb.append("切换档位?, ");
-        if (sb.length() == 0) return "(无)";
-        return sb.toString().trim().replaceAll(",$", "");
+        if (shotPressed(k1)) sb.append("拍照, ");
+        if (recPressed(k2)) sb.append("录像, ");
+        if (c1Pressed(k3)) sb.append("C1, ");
+        if (c2Pressed(k3)) sb.append("C2, ");
+        sb.append("档=").append(gearName(k3));
+        return sb.toString();
     }
 
     private final java.util.LinkedHashMap<String, String> seen =
@@ -437,6 +486,15 @@ public final class DumlStick {
                     }
                     btnK1 = k1; btnK2 = k2; btnK3 = k3;
                 }
+                // 单键测试窗口内：把每次出现的组合都记下来（不管变没变），
+                // 这样"一直按同一个键"期间会累积出该键的所有取值形态。
+                if (keyRec) {
+                    String sig = String.format("k1=%02x k2=%02x k3=%02x", k1, k2, k3);
+                    synchronized (keySeen) {
+                        Integer cc = keySeen.get(sig);
+                        keySeen.put(sig, cc == null ? 1 : cc + 1);
+                    }
+                }
             }
             stickFrames++;
             stickHzCount++;
@@ -448,10 +506,21 @@ public final class DumlStick {
             if (gap > maxGapMs) maxGapMs = gap;
             if (gap > 150) { gapOver150++; Log.w(TAG, "READ GAP " + gap + "ms (hungry?)"); }
             lastHex = hex(b, p, 12);
+            // 原始载荷记录：只要摇杆帧、且内容变了才记（避免刷屏），最多 4000 条
+            {
+                String sig = hex(b, pb, Math.min(22, b.length - pb));
+                if (!sig.equals(lastRawSig)) {
+                    lastRawSig = sig;
+                    if (rawLog.length() < 200000)
+                        rawLog.append(System.currentTimeMillis() % 1000000).append(' ').append(sig).append((char) 10);
+                }
+            }
             if (sampleT0 < 0) sampleT0 = System.currentTimeMillis();
             if (samples.length() < 120000) {
                 samples.append(System.currentTimeMillis() - sampleT0);
                 for (int k = 0; k < AXES; k++) samples.append(',').append(next[k]);
+                // 2026-11-06：把按键位也记进采样，方便事后对照"拨某个开关时哪个字节动了"
+                samples.append(",k=").append(btnK1).append('/').append(btnK2).append('/').append(btnK3);
                 samples.append((char) 10);
             }
         }
@@ -634,6 +703,22 @@ public final class DumlStick {
 
     public String dumpSamples() {
         return samples.length() == 0 ? "(无摇杆采样)" : samples.toString();
+    }
+
+    /** 清空采样缓冲并重新开始计时（抓一段干净的窗口用）。 */
+    public synchronized void sampleReset() {
+        samples.setLength(0);
+        sampleT0 = -1;
+        maxGapMs = 0;
+        gapOver150 = 0;
+    }
+
+    // ---- 原始帧环形缓冲：记录 06/AE 的完整 22 字节载荷，用于离线比对 ----
+    private final StringBuilder rawLog = new StringBuilder();
+    /** 记一条原始载荷（含按键位与全部摇杆字节）。 */
+    public synchronized void rawReset() { rawLog.setLength(0); samples.setLength(0); sampleT0 = -1; }
+    public synchronized String rawDump() {
+        return rawLog.length() == 0 ? "(无原始帧)" : rawLog.toString();
     }
 
     /** 帧类型普查结果，供诊断页/adb 报告用。 */

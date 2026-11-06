@@ -13,10 +13,20 @@ public final class ChannelConfig {
     public static final int SRC_AUX4 = 7;
     public static final int SRC_KNOB1 = 8;
     public static final int SRC_KNOB2 = 9;
+    // 2026-11-06 新增：把物理按键/档位做成独立「开关源」。
+    // 原有 AUX1..AUX4 只有 4 个槽，用户需要的不止 4 个：
+    //   调档键(S/C 两档) + C1 + C2 + 拍照 + 录像 = 6 个信号
+    // 这里补 4 个开关源，全部是"两态"（按下=+1，松开=-1），
+    // 调档键的 S/C 也用两态表达（C 档=+1，非 C 档=-1）。
+    public static final int SRC_SW_S = 10;   // 调档 S 档（S 位=+1，其余=-1）
+    public static final int SRC_SW_C = 11;   // 调档 C 档（C 位=+1，其余=-1）
+    public static final int SRC_SW_REC = 12; // 录像键（按下=+1）
+    public static final int SRC_SW_SHOT = 13;// 拍照键（按下=+1，两段会各触发）
 
     public static final String[] SRC_NAMES = {
             "AIL 横滚", "ELV 俯仰", "THR 油门", "RUD 偏航",
-            "AUX1", "AUX2", "AUX3", "AUX4", "K1 旋钮", "K2 旋钮", "未使用"
+            "AUX1", "AUX2", "AUX3", "AUX4", "K1 旋钮", "K2 旋钮",
+            "SW_S 调档S", "SW_C 调档C", "SW_REC 录像", "SW_SHOT 拍照", "未使用"
     };
 
     public int src = SRC_NONE;

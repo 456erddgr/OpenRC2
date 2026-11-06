@@ -207,6 +207,12 @@ public class NativePanel extends Panel {
         if (bmp == null) return;
         // 直接给硬件原始 11bit ADC（0..2047），由原生核心按 radio.yml 自行校准
         radio.fillNativeAxes(axes, knobsLocal);
+        // 2026-11-06：按键/调档必须在这里同步。
+        // 根因：这几个通道由 sw[] 驱动，sw[] 读的是 radio.input.aux1..4；
+        // 而负责给 aux 赋值的 applyRcProButtons() 只在 fillNativeAxes7() 里调用，
+        // 实际走的却是 fillNativeAxes(4 轴) → 按键永远到不了通道。
+        // 这里直接按 duml 的按键位算 aux，绕开那条没被执行到的路径。
+        radio.syncAuxFromKeys();
         // 2026-11-03：开关位置要送 0/1/2（上/中/下），原来只有 0/1，
         // 而且负值（-1）被当成"按下"。现在按 aux 的正负判上/下，0 判中位。
         sw[0] = swPos(radio.input.aux1);
