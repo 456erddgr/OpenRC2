@@ -27,21 +27,27 @@ public final class Mixer {
     /** 出厂默认：AETR + 4 个三档开关 + 2 个旋钮。 */
     public static ChannelConfig[] defaultConfig() {
         ChannelConfig[] c = new ChannelConfig[CH_COUNT];
+        // ===== 2026-11-06 重排：同类别连在一起，不再东一个西一个 =====
+        // ① 摇杆四轴
         c[0] = new ChannelConfig(ChannelConfig.SRC_AIL, "横滚");
         c[1] = new ChannelConfig(ChannelConfig.SRC_ELV, "俯仰");
         c[2] = new ChannelConfig(ChannelConfig.SRC_THR, "油门");
         c[3] = new ChannelConfig(ChannelConfig.SRC_RUD, "偏航");
-        for (int i = 4; i <= 7; i++) {
-            c[i] = new ChannelConfig(ChannelConfig.SRC_AUX1 + (i - 4), "开关" + (i - 3));
-        }
-        c[8] = new ChannelConfig(ChannelConfig.SRC_KNOB1, "旋钮1");
-        c[9] = new ChannelConfig(ChannelConfig.SRC_KNOB2, "旋钮2");
-        // 2026-11-06：物理按键/档位的独立通道（用户要求"这些按钮为通道"）
-        c[10] = new ChannelConfig(ChannelConfig.SRC_SW_REC, "录像键");
-        c[11] = new ChannelConfig(ChannelConfig.SRC_SW_SHOT, "拍照键");
-        c[12] = new ChannelConfig(ChannelConfig.SRC_SW_S, "调档S");
-        c[13] = new ChannelConfig(ChannelConfig.SRC_SW_C, "调档C");
-        for (int i = 14; i < CH_COUNT; i++) {
+        // ② 旋钮（K1/K2）
+        c[4] = new ChannelConfig(ChannelConfig.SRC_KNOB1, "旋钮K1");
+        c[5] = new ChannelConfig(ChannelConfig.SRC_KNOB2, "旋钮K2");
+        // ③ 自定义按键（C1/C2 是后面那两个，与 AUX2/AUX3 同源）
+        c[6] = new ChannelConfig(ChannelConfig.SRC_AUX2, "按键C1");
+        c[7] = new ChannelConfig(ChannelConfig.SRC_AUX3, "按键C2");
+        // ④ 拍照 / 录像（独立源，不再和 AUX4 抢槽）
+        c[8] = new ChannelConfig(ChannelConfig.SRC_SW_SHOT, "按键拍照");
+        c[9] = new ChannelConfig(ChannelConfig.SRC_SW_REC, "按键录像");
+        // ⑤ 调档键：S / N / C 三个独立通道（N 档默认 +100%）
+        c[10] = new ChannelConfig(ChannelConfig.SRC_AUX1, "调档主");   // N=+100 C=-100
+        c[11] = new ChannelConfig(ChannelConfig.SRC_SW_S, "调档S");
+        c[12] = new ChannelConfig(ChannelConfig.SRC_SW_C, "调档C");
+        // ⑥ 其余留给用户
+        for (int i = 13; i < CH_COUNT; i++) {
             c[i] = new ChannelConfig(ChannelConfig.SRC_NONE, "CH" + (i + 1));
         }
         return c;

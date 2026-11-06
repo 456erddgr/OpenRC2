@@ -738,11 +738,10 @@ public final class Radio {
                 input.aux1 = (gear == 2) ? -1f : (gear == 1 ? 1f : 0f);   // C/N/S → -1/+1/0
                 input.aux2 = com.rc2.etx.input.DumlStick.c1Pressed(gk3) ? 1f : -1f;
                 input.aux3 = com.rc2.etx.input.DumlStick.c2Pressed(gk3) ? 1f : -1f;
-                input.aux4 = com.rc2.etx.input.DumlStick.shotPressed(duml.btnK1) ? 1f : -1f;
-                // 2026-11-06：拍照键原本占 AUX4，但用户说「拍照键和 AUX4 变得一样了」，
-                // 说明那个位置更该给别的东西。拍照已经有独立通道 CH12(SW_SHOT)，
-                // 所以 AUX4 改成「录像键」，与 CH11 一致，不再和拍照重复。
-                input.aux4 = com.rc2.etx.input.DumlStick.recPressed(duml.btnK2) ? 1f : -1f;
+                // 2026-11-06 去重：用户报「录像键和 AUX4 重合」——原来这里先写拍照、
+                // 又被录像覆盖，等于两个键抢同一个槽，而且和 CH11/CH12 重复。
+                // 现在 AUX4 不再承担按键，只留给未来扩展；按键一律走独立源。
+                input.aux4 = 0f;
                 // 独立开关源：S / C / 录像 / 拍照（两态，+1=有效，-1=无效）
                 input.swS  = (gear == 0) ? 1f : -1f;
                 input.swC  = (gear == 2) ? 1f : -1f;
@@ -874,7 +873,7 @@ public final class Radio {
         input.aux1 = (gear == 2) ? -1f : (gear == 1 ? 1f : 0f);   // C/N/S → -1/+1/0
         input.aux2 = com.rc2.etx.input.DumlStick.c1Pressed(k3) ? 1f : -1f;
         input.aux3 = com.rc2.etx.input.DumlStick.c2Pressed(k3) ? 1f : -1f;
-        input.aux4 = com.rc2.etx.input.DumlStick.shotPressed(k1) ? 1f : -1f;
+        input.aux4 = 0f;   // 2026-11-06：不再和按键复用（按键走独立源 CH11-CH14）
     }
 
     private int kbcalls;
