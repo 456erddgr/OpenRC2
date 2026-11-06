@@ -66,8 +66,36 @@ public final class DumlStick {
     public volatile String err = "-";
     /** 断线次数（诊断用）。 */
     public volatile int reconnects;
-    /** 连续重连次数（用于退避）。 */
     public volatile int burst;
+
+    // ---- 按键位图（2026-11-06 实测解出，见 docs/23）----
+    /** 06/AE 载荷 [7][8][9] 三个位图字节。静止时 k1=0 k2=0 k3=1。 */
+    public volatile int btnK1 = 0, btnK2 = 0, btnK3 = 1;
+    /** 位图变化次数（诊断用）。 */
+    public volatile int btnChanges;
+
+    /**
+     * 是否有「真按键」。
+     * k3 的 0x01 是常驻有效位、0x02 是拨轮中位常驻值，都要掩掉；
+     * 实测真键：k3=0x04 后自定义B / 0x08 拍照 / k1=0x40 或 k2=0x01 录像。
+     */
+    public static boolean hasKey(int k1, int k2, int k3) {
+        return (k1 & 0x40) != 0 || (k2 & 0x01) != 0 || (k3 & 0xFC) != 0;
+    }
+
+    /** 把三个位图字节翻成人能读的键名。 */
+    public static String decodeKeys(int k1, int k2, int k3) {
+        StringBuilder sb = new StringBuilder();
+        if ((k1 & 0x40) != 0) sb.append("录像(k1.40), ");
+        if ((k2 & 0x01) != 0) sb.append("录像(k2.01), ");
+        int low = k3 & 0xFC;                  // 掩掉常驻 0x01 / 0x02
+        if ((low & 0x04) != 0) sb.append("后自定义B, ");
+        if ((low & 0x08) != 0) sb.append("拍照, ");
+        if ((low & 0x10) != 0) sb.append("后自定义A?, ");
+        if ((low & 0x20) != 0) sb.append("切换档位?, ");
+        if (sb.length() == 0) return "(无)";
+        return sb.toString().trim().replaceAll(",$", "");
+    }
 
     private final java.util.LinkedHashMap<String, String> seen =
             new java.util.LinkedHashMap<String, String>();
@@ -389,6 +417,27 @@ public final class DumlStick {
                 next[k] = v;
             }
             raw = next;                 // 一次性发布，控制环永远看到完整一帧
+            // ==== 按键位图（2026-11-06 差分测试实测解出，见 docs/23）====
+            // 06/AE 载荷布局（payload 从 off+4 起）：
+            //   [0]snd=06 [1]rcv=02 [2..3]seq [4]attr [5]cmd_set=06 [6]cmd_id=AE
+            //   [7][8][9] = 按键位图   [11..22] = 6×u16 摇杆
+            // 实测：静止 k1=0 k2=0 k3=1；后自定义B→k3=05；拍照→k3=09；
+            //       录像→k1=40 且 k2=01；拨轮中位常驻 k3=02。
+            int pb = off + 4;
+            if (pb + 10 < b.length) {
+                int k1 = b[pb + 7] & 0xFF;
+                int k2 = b[pb + 8] & 0xFF;
+                int k3 = b[pb + 9] & 0xFF;
+                if (k1 != btnK1 || k2 != btnK2 || k3 != btnK3) {
+                    if (hasKey(k1, k2, k3) || hasKey(btnK1, btnK2, btnK3)) {
+                        Log.i(TAG, "KEYMAP k1=" + k1 + " k2=" + k2 + " k3=" + k3
+                                + " (was " + btnK1 + "/" + btnK2 + "/" + btnK3 + ")"
+                                + " names=" + decodeKeys(k1, k2, k3));
+                        btnChanges++;
+                    }
+                    btnK1 = k1; btnK2 = k2; btnK3 = k3;
+                }
+            }
             stickFrames++;
             stickHzCount++;
             lastStickMs = System.currentTimeMillis();
