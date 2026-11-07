@@ -376,7 +376,7 @@ expoData:
    mode: 3
    scale: 0
    trimSource: 1
-   srcRaw: "SE"
+   srcRaw: "SG"
    weight: 100
    offset: 0
    swtch: "NONE"

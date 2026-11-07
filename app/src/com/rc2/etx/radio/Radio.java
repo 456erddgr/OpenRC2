@@ -1018,11 +1018,12 @@ public final class Radio {
         //   AUX2 = C1
         //   AUX3 = C2
         if (input != null) {
-            switch (gear) {
-                case 0:  input.aux1 = -1f; break;   // S 档
-                case 2:  input.aux1 =  1f; break;   // C 档
-                default: input.aux1 =  0f; break;   // H 档（中）
-            }
+            // 2026-11-06 修：这里原来是 S=-1 / C=+1 / 中=0，与上面第 738 行的
+            // N=+1 / S=0 / C=-1 **极性相反**。两个地方每帧都写 aux1，谁后写谁生效，
+            // 结果就是「S 档能看出变化、C 档和 N 档撞成同一个值」。
+            // 现在全工程只认一个口径：N(H)=+1 / S=0 / C=-1（Java 混控 CH11
+            // 也按这个口径配：N=+100% / S=0% / C=-100%）。
+            input.aux1 = (gear == 2) ? -1f : (gear == 1 ? 1f : 0f);   // C/N/S → -1/+1/0
             input.aux2 = c1 ? 1f : -1f;
             input.aux3 = c2 ? 1f : -1f;
         }

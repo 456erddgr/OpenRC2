@@ -90,7 +90,8 @@ public class NativePanel extends Panel {
     private final Paint paint = new Paint();   // 最近邻：480x272 放大到 1920x1080 保持像素锐利（双线性会糊）
 
     private final int[] axes = new int[7];
-    private final int[] sw = new int[4];
+    /** 2026-11-06：从 4 扩到 8 —— 原生侧 boardGetMaxSwitches() 已改成 8。 */
+    private final int[] sw = new int[8];
     private final int[] knobs = new int[2];
     private final int[] knobsLocal = new int[2];
     private final int[] chUs = new int[16];
@@ -124,15 +125,23 @@ public class NativePanel extends Panel {
     }
 
 
-    /** 把 EdgeTX 的当前设置写回 radio.yml（3 次 RTN + 跑帧，让 EdgeTX 自己落盘）。 */
+    /** 把 EdgeTX 的当前设置写回 radio.yml（真正落盘，不是按 RTN 碰运气）。 */
     public void flushSettings() {
         try {
+            // 2026-11-07 修「改设置重启就丢」：
+            // 原来只是连按 3 次 RTN 让上游"离开页面"——但 EdgeTX 的存档函数
+            // storageCheck() 只在关机流程里被调用，我们这套移植永远不关机，
+            // 所以那些改动一直在内存里，进程一被杀就没了。
+            // 现在先按 RTN 让页面提交编辑，再调原生 etxFlushStorage() 强制写盘。
             for (int i = 0; i < 3; i++) {
-                queueKey(5);          // 5 = EXIT（返回/RTN）。见 native src/ui/etx_ui_glue.cpp 的 kKeyMap
+                queueKey(5);          // 5 = EXIT（返回/RTN）。见 native kKeyMap
                 tick();
                 Thread.sleep(40);
             }
-            android.util.Log.i("ETX-Flush", "settings flushed to radio.yml");
+            int left = EtxNative.flushStorage();
+            android.util.Log.i("ETX-Flush", "flushStorage left=" + left
+                    + (left == 0 ? "（已全部落盘）" : "（仍有未写位，见日志）")
+                    + (left == -1 ? "（旧 so 无此符号，退化为按 RTN）" : ""));
         } catch (Throwable t) {
             android.util.Log.w("ETX-Flush", "flush failed: " + t);
         }
@@ -215,10 +224,26 @@ public class NativePanel extends Panel {
         radio.syncAuxFromKeys();
         // 2026-11-03：开关位置要送 0/1/2（上/中/下），原来只有 0/1，
         // 而且负值（-1）被当成"按下"。现在按 aux 的正负判上/下，0 判中位。
-        sw[0] = swPos(radio.input.aux1);
-        sw[1] = swPos(radio.input.aux2);
-        sw[2] = swPos(radio.input.aux3);
-        sw[3] = swPos(radio.input.aux4);
+        // 槽位分配（与 native src/hal/etx_hal_misc.cpp 的 boardSwitchGetName 一一对应）：
+        //   SA(0)=调档三档(N=上/S=中/C=下)  SB(1)=C1  SC(2)=C2  SD(3)=拍照
+        //   SE(4)=录像  SF(5)=调档S  SG(6)=调档C  SH(7)=备用
+        // 调档键 SA 是 3POS，必须三个位置互不相同，否则 EdgeTX 上「C 档和 N 档」
+        // 会显示成同一个值（用户报「拨到 C 档没反应」就是这个）。
+        // 全工程统一口径：aux1 的 N(H)=+1 / S=0 / C=-1。
+        // EdgeTX 3POS 的位置码：0=上(+100) / 1=中(0) / 2=下(-100)。
+        // 所以 N→上(0)、S→中(1)、C→下(2)。**不能用 swPos()**，它把 -1 和 0 都判成 0。
+        {
+            float a = radio.input.aux1;
+            sw[0] = a > 0.5f ? 0 : (a < -0.5f ? 2 : 1);
+        }
+        sw[1] = swPos(radio.input.aux2);   // C1
+        sw[2] = swPos(radio.input.aux3);   // C2
+        sw[3] = swPos(radio.input.aux4);   // 拍照（aux4 已改为不再复用，见 Radio）
+        // 新增 4 个：两态开关，DOWN(2)=按下/在该档，UP(0)=松开/不在该档
+        sw[4] = radio.duml != null && radio.duml.btnK2 != 0 ? 2 : 0;          // 录像
+        sw[5] = radio.duml != null && (radio.duml.btnK3 & 3) == 0 ? 2 : 0;    // 调档S
+        sw[6] = radio.duml != null && (radio.duml.btnK3 & 3) == 2 ? 2 : 0;    // 调档C
+        sw[7] = 0;
         knobs[0] = knobsLocal[0];
         knobs[1] = knobsLocal[1];
         // 每约 1 秒把系统电池电压推给核心（V15 状态栏要显示真实电压）
@@ -236,9 +261,9 @@ public class NativePanel extends Panel {
                 if (gamepad != null) gamepadWins = false;
                 if (radio.nativeAxes7 && axes7 != null) {
                     radio.fillNativeAxes7(axes7);
-                    EtxNative.setInputs(axes7, 7, sw, 4, knobs, 2);
+                    EtxNative.setInputs(axes7, 7, sw, 8, knobs, 2);
                 } else {
-                    EtxNative.setInputs(axes, 4, sw, 4, knobs, 2);
+                    EtxNative.setInputs(axes, 4, sw, 8, knobs, 2);
                 }
             }
             // 传真实经过的毫秒数：原来硬编码 33，ticker 改 16ms 后会让 EdgeTX 内部时钟跑 2 倍速，

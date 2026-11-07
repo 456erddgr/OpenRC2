@@ -44,7 +44,59 @@ public final class SdSeed {
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/elrsV3.lua");
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/elrsgyro.lua");
         copyIfMissing(ctx, sd, "SCRIPTS/TOOLS/rf2.lua");
+        migrateModel1GearToCh9(sd);
         return sd;
+    }
+
+    /**
+     * 2026-11-06：把默认模型的第 9 输入源从 SE 换成 SG。
+     *
+     * 背景：用户报「拨到 C 档 CH9 没反应，拨到 S 档 CH10 有反应」。
+     * 原生 model1.yml 里输入 8（→CH9）原来绑的是 SE（录像键），输入 9（→CH10）
+     * 绑的是 SF（调档S）。所以 S 档能动、C 档永远不动。
+     * 现在把输入 8 改绑 SG（调档C），CH9 跟着 C 档动，CH10 继续跟 S 档。
+     *
+     * 这是"只改一行"的定点迁移：整个文件里 `srcRaw: "SE"` 只出现一次
+     * （`mixData` 段用的是 `I8`）。改完再跑不会命中，天然幂等。
+     * 改之前先备份成 model1.yml.bak，用户真改过也能回退。
+     */
+    private static void migrateModel1GearToCh9(File sd) {
+        File f = new File(sd, "MODELS/model1.yml");
+        if (!f.exists() || f.length() == 0) return;
+        try {
+            byte[] raw = readAll(f);
+            String s = new String(raw, "UTF-8");
+            final String from = "srcRaw: \"SE\"";
+            final String to = "srcRaw: \"SG\"";
+            if (s.indexOf(from) < 0) return;   // 已经迁移过 / 用户自建模型
+            File bak = new File(sd, "MODELS/model1.yml.bak");
+            if (!bak.exists()) writeAll(bak, raw);
+            writeAll(f, s.replace(from, to).getBytes("UTF-8"));
+            Log.i(TAG, "migrate model1: 输入8 SE -> SG（CH9 改跟随 C 档）");
+        } catch (Throwable t) {
+            Log.w(TAG, "migrate model1 失败: " + t);
+        }
+    }
+
+    private static byte[] readAll(File f) throws IOException {
+        java.io.FileInputStream in = new java.io.FileInputStream(f);
+        try {
+            byte[] buf = new byte[(int) f.length()];
+            int off = 0, n;
+            while (off < buf.length && (n = in.read(buf, off, buf.length - off)) > 0) off += n;
+            return buf;
+        } finally {
+            try { in.close(); } catch (IOException ignore) { }
+        }
+    }
+
+    private static void writeAll(File f, byte[] data) throws IOException {
+        FileOutputStream out = new FileOutputStream(f, false);
+        try {
+            out.write(data);
+        } finally {
+            try { out.close(); } catch (IOException ignore) { }
+        }
     }
 
     private static void mkdirs(File f) {

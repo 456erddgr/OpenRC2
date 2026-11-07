@@ -185,6 +185,13 @@ public class MainActivity extends Activity implements Host {
         super.onPause();
     }
 
+    protected void onStop() {
+        // 2026-11-07：进程可能被系统直接杀掉，onPause 不一定有机会跑完。
+        // onStop 再兜一次强制落盘（etxFlushStorage 是同步写，很快）。
+        if (view != null) view.flushNativeSettings();
+        super.onStop();
+    }
+
     protected void onDestroy() {
         try { if (usbStateRx != null) unregisterReceiver(usbStateRx); } catch (Throwable ignore) { }
         try {

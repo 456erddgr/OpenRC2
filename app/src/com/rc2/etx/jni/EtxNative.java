@@ -42,6 +42,18 @@ public final class EtxNative {
     private static native int etxUiPendingTap();
     private static native int rotary(int steps);
 
+    /**
+     * 2026-11-07：强制把 EdgeTX 设置写盘（radio.yml / model1.yml）。
+     * 返回 0 = 全部写成功；非 0 = 还剩哪些脏位没写（EE_GENERAL|EE_MODEL|EE_LABELS）。
+     * 符号不存在（旧版 so）时返回 -1，调用方应退化为「按 RTN 让上游自己写」。
+     */
+    private static native int etxFlushStorage();
+
+    /** 把设置写盘；任何异常都吞掉，绝不因为存档失败把 App 带崩。 */
+    public static int flushStorage() {
+        try { return etxFlushStorage(); } catch (Throwable t) { return -1; }
+    }
+
     /** C 路：取固件自己的每轴校准窗口。out[0]=min out[1]=mid out[2]=max。符号缺失时 false。 */
     public static native boolean axisCalib(int axis, int[] out);
 
