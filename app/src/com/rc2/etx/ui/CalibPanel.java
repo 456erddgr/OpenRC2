@@ -287,16 +287,16 @@ public final class CalibPanel extends Panel {
             boolean bound = bind[i] >= 0;
             RectF rr = new RectF(x + i * (cw + ui.d(6)), y, x + i * (cw + ui.d(6)) + cw, y + ch);
             p.setStyle(Paint.Style.FILL);
-            p.setColor(bound ? 0xFF1E7A5A : 0xFF1A2230);
+            p.setColor(bound ? Ui.ACC_DIM : Ui.CARD2);
             c.drawRoundRect(rr, ui.d(8), ui.d(8), p);
             if (bound) {
                 p.setStyle(Paint.Style.STROKE);
                 p.setStrokeWidth(ui.d(2));
-                p.setColor(0xFF5AD1A5);
+                p.setColor(Ui.OK);
                 c.drawRoundRect(rr, ui.d(8), ui.d(8), p);
                 p.setStyle(Paint.Style.FILL);
             }
-            p.setColor(bound ? 0xFF8FF0CC : 0xFF5B6B7C);
+            p.setColor(bound ? Ui.OK : Ui.FAINT);
             p.setTextAlign(Paint.Align.CENTER);
             c.drawText((bound ? "✓ " : "○ ") + SLOT_NAME[i], rr.centerX(), rr.centerY() + ui.d(4), p);
         }
@@ -308,11 +308,11 @@ public final class CalibPanel extends Panel {
             if (ax < 0) continue;
             float span = Math.min(1f, (mxRaw[ax] - mnRaw[ax]) / 1.35f);
             RectF bar = new RectF(a.left + ui.d(16), by + i * ui.d(20), a.left + ui.d(16) + bw, by + i * ui.d(20) + ui.d(13));
-            p.setColor(0xFF18202B); c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
-            p.setColor(span > 0.92f ? 0xFF5AD1A5 : (span > 0.7f ? Ui.ACC : 0xFFE0653B));
+            p.setColor(Ui.CARD2); c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
+            p.setColor(span > 0.92f ? Ui.OK : (span > 0.7f ? Ui.ACC : Ui.BAD));
             bar.right = bar.left + bw * span;
             c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
-            p.setColor(0xFFC7D3DF);
+            p.setColor(Ui.DIM);
             p.setTextSize(ui.d(11));
             c.drawText(SLOT_NAME[i] + "  " + (int) (span * 100) + "%",
                     a.left + ui.d(22), bar.centerY() + ui.d(4), p);

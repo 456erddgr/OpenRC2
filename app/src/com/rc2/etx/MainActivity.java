@@ -438,6 +438,14 @@ public class MainActivity extends Activity implements Host {
             Log.i(TAG, "YML-REPORT " + rep);
             writeReport("radioyml.txt", rep);
             toast("radio.yml 解析结果已写入 radioyml.txt");
+        } else if ("widgets".equals(act)) {
+            // 2026-11-07 诊断：dump 内核内存里**当前生效**的屏幕/顶栏小组件。
+            // 和 SD 卡上 model1.yml 的 screenData / topbarData 对照，
+            // 就能判断「改了没进内存」还是「进了内存没写进文件」。
+            final String dump = com.rc2.etx.jni.EtxNative.widgetDump();
+            Log.i(TAG, "WIDGET-DUMP len=" + (dump == null ? -1 : dump.length()) + " [" + dump + "]");
+            writeReport("widgets.txt", dump);
+            toast("小组件状态已写入 widgets.txt");
         } else if ("key".equals(act)) {
             final int k = i.getIntExtra("k", 4);
             // hold=按下保持时长(ms)。短按 60ms；>400ms 才会被 EdgeTX 识别为 LONG_PRESS

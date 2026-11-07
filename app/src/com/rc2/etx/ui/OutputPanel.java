@@ -61,21 +61,30 @@ public final class OutputPanel extends Panel {
             boolean on = (i == kind);
             ui.button(c, kindR[i], KIND[i], on ? Ui.ACC : Ui.BLUE, on, 14);
         }
-        ui.text(c, "波特率（USB）", left.left + ui.d(12), left.top + ui.d(244), 12, Ui.DIM, false);
-        // 2026-11-03 修正：原来三个按钮横排（每档 90dp 宽、第三档右缘到 d(276)），
-        // 而左卡片只有 40% 屏宽 → 第三个按钮会被切掉/压到「应用并打开」上。
-        // 改成两列网格：上排两个、下排一个，全部落在卡片内。
+        // 2026-11-07 重排左栏（原来用绝对 y 值，波特率第二行会压到"应用并打开"上）：
+        // 全部改成「相对于卡片底部」倒推，卡片矮的时候也不会重叠。
+        // 底部预留：关闭输出(40) + 间距(6) + 应用并打开(40) + 间距(10)
+        float closeH = ui.d(40), openH = ui.d(40), gap = ui.d(6), gap2 = ui.d(10);
+        float bottomStack = closeH + gap + openH + gap2;      // 整个底部块的高度
+        float baudLabelY = left.bottom - bottomStack - ui.d(52);
+        float baudRow0 = baudLabelY + ui.d(12);
+        float baudRow1 = baudRow0 + ui.d(40);
+
+        ui.text(c, "波特率（USB）", left.left + ui.d(12), baudLabelY, 12, Ui.FAINT, false);
         float bw = (left.width() - ui.d(12) * 2 - ui.d(8)) / 2f;
         for (int i = 0; i < 3; i++) {
             int col = i % 2, row = i / 2;
             float bx = left.left + ui.d(12) + col * (bw + ui.d(8));
-            float by = left.top + ui.d(254) + row * ui.d(42);
-            baudR[i].set(bx, by, bx + bw, by + ui.d(36));
+            float by = row == 0 ? baudRow0 : baudRow1;
+            baudR[i].set(bx, by, bx + bw, by + ui.d(34));
             boolean on = (i == baudIdx);
             ui.button(c, baudR[i], String.valueOf(BAUD[i]), on ? Ui.ACC : Ui.BLUE, on, 12);
         }
-        openR.set(left.left + ui.d(12), left.bottom - ui.d(96), left.left + ui.d(12) + ui.d(140), left.bottom - ui.d(56));
-        closeR.set(left.left + ui.d(12), left.bottom - ui.d(50), left.left + ui.d(12) + ui.d(140), left.bottom - ui.d(10));
+
+        openR.set(left.left + ui.d(12), left.bottom - closeH - gap - openH,
+                left.right - ui.d(12), left.bottom - closeH - gap);
+        closeR.set(left.left + ui.d(12), left.bottom - closeH,
+                left.right - ui.d(12), left.bottom);
         ui.button(c, openR, "应用并打开", Ui.ACC, true, 14);
         ui.button(c, closeR, "关闭输出", Ui.BAD, false, 14);
 
@@ -106,7 +115,7 @@ public final class OutputPanel extends Panel {
 
         y += ui.d(30);
         infoR.set(x, y, right.right - ui.d(12), right.bottom - ui.d(12));
-        ui.card(c, infoR, 0xFF121820);
+        ui.card(c, infoR, Ui.CARD);
         drawWrapped(c, ui, (lastInfo == null || lastInfo.length() == 0)
                         ? "（还没有输出日志。点「发送 100 帧」或「扫描 USB 设备」看结果。）"
                         : lastInfo,

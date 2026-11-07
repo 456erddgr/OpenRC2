@@ -29,12 +29,12 @@ public class UsbDialog extends Dialog {
             "手机助手 / 传文件 / adb（默认）",
             "还没做"
     };
-    private static final int C_BG = 0xFF12171F;
-    private static final int C_LINE = 0xFF2A3441;
-    private static final int C_TXT = 0xFFE9EEF5;
-    private static final int C_DIM = 0xFF8A96A6;
+    private static final int C_BG = Ui.CARD;
+    private static final int C_LINE = Ui.LINE;
+    private static final int C_TXT = Ui.TEXT;
+    private static final int C_DIM = Ui.DIM;
     private static final int C_ACC = Ui.ACC;
-    private static final int C_WARN = 0xFFE0653B;
+    private static final int C_WARN = Ui.BAD;
 
     private final float d;
     private final Pick pick;
@@ -104,7 +104,7 @@ public class UsbDialog extends Dialog {
             for (int i = 0; i < 4; i++) {
                 RectF r = rows[i];
                 boolean hot = (pressed == i);
-                p.setColor(hot ? 0xFF23303D : 0xFF1A212B);
+                p.setColor(hot ? Ui.CARD2 : Ui.CARD);
                 c.drawRoundRect(r, dp(12), dp(12), p);
                 // 左侧色条
                 p.setColor(i == 0 ? Ui.OK : (i == 1 ? C_ACC : (i == 3 ? C_WARN : Ui.BLUE)));

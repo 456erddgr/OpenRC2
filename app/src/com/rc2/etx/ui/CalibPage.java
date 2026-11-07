@@ -185,7 +185,7 @@ public class CalibPage extends Panel {
 
     @Override public void draw(Canvas c, Ui ui, RectF a) {
         float w = a.width(), h = a.height();
-        p.setStyle(Paint.Style.FILL); p.setColor(0xFF0E1319);
+        p.setStyle(Paint.Style.FILL); p.setColor(Ui.BG);
         c.drawRect(a, p);
 
         // 四轴卡
@@ -195,7 +195,7 @@ public class CalibPage extends Panel {
             RectF r = new RectF(x, cy, x + cw, cy + ch);
             boolean done = step >= 3 || (step == 2 && hits[i] >= PEAKS && peak[i] >= PEAK);
             boolean bnd = bind[i] >= 0;
-            p.setColor(done ? 0xFF17351F : 0xFF151A22);
+            p.setColor(done ? Ui.CARD3 : Ui.CARD);
             c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(h * 0.004f);
             p.setColor(done ? Ui.OK : (bnd ? Ui.ACC : Ui.LINE));
@@ -316,14 +316,14 @@ public class CalibPage extends Panel {
 
     private void btn(Canvas c, RectF r, String s, boolean primary, float h) {
         p.setStyle(Paint.Style.FILL);
-        p.setColor(primary ? Ui.ACC : 0xFF1B2430);
+        p.setColor(primary ? Ui.ACC : Ui.CARD2);
         c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
         p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(h * 0.004f);
-        p.setColor(primary ? Ui.ACC : 0xFF39506B);
+        p.setColor(primary ? Ui.ACC : Ui.LINE);
         c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
         p.setStyle(Paint.Style.FILL);
         txt(c, s, r.centerX(), r.centerY() + h * 0.018f, h * 0.042f,
-                primary ? 0xFF101720 : 0xFFD6DEE8, true);
+                primary ? Ui.CARD : Ui.TEXT, true);
     }
 
     @Override public boolean down(int id, float x, float y) {

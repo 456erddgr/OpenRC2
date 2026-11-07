@@ -70,7 +70,7 @@ public final class DiagPanel extends Panel {
             ui.button(c, btn[i], LABEL[i], i == 0 ? Ui.ACC : Ui.BLUE, i == 0, 13);
         }
         textR.set(a.left + pad, a.top + pad + bh + ui.d(8), a.right - pad, a.bottom - pad);
-        ui.card(c, textR, 0xFF10161D);
+        ui.card(c, textR, Ui.BG);
 
         lineH = ui.d(13);
         List<String> wrapped = wrapped(ui, textR.width() - ui.d(16));

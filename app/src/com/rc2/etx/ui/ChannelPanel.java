@@ -118,7 +118,7 @@ public final class ChannelPanel extends Panel {
             boolean active = Math.abs(pct[i]) >= 5;
 
             // 行底：只有奇数行给极淡的底，形成"斑马纹"但几乎看不见（DJI 不用重底）
-            if ((i % 2) == 0) ui.card(c, row, 0xFF171E27);
+            if ((i % 2) == 0) ui.card(c, row, Ui.CARD2);
 
             float cy = row.centerY() + ui.d(4);
             // 通道号：等宽 + 压暗；名字：正文色
@@ -139,7 +139,7 @@ public final class ChannelPanel extends Panel {
             float bw = row.right - bx - ui.d(10);
             float midY = row.centerY();
             barBg.set(bx, midY - ui.d(4), bx + bw, midY + ui.d(4));
-            ui.cardR(c, barBg, ui.R_SM, 0xFF202833);
+            ui.cardR(c, barBg, ui.R_SM, Ui.CARD2);
             float mid = bx + bw / 2f;
             ui.line(c, mid, barBg.top - ui.d(1), mid, barBg.bottom + ui.d(1), Ui.LINE, 1f);
             float v = Math.max(-1f, Math.min(1f, pct[i] / 100f));
@@ -158,7 +158,7 @@ public final class ChannelPanel extends Panel {
         // 组头右侧一条极淡的线，把组和内容连起来
         float tw = ui.w(name, 9, true);
         ui.line(c, body.left + ui.d(14) + tw, y + ui.d(8),
-                body.right - ui.d(12), y + ui.d(8), 0xFF1E2632, 1f);
+                body.right - ui.d(12), y + ui.d(8), Ui.LINE, 1f);
     }
 
     /** 通道类别：0=摇杆 1=旋钮 2=按键 3=档位。 */

@@ -34,7 +34,7 @@ public class Splash extends View {
         this.icon = icon;
         this.onDone = onDone;
         this.d = c.getResources().getDisplayMetrics().density;
-        setBackgroundColor(0xFF0E1319);
+        setBackgroundColor(Ui.BG);
     }
 
     @Override
@@ -43,7 +43,7 @@ public class Splash extends View {
         float t = Math.min(1f, (System.currentTimeMillis() - t0) / 1600f);
         float a = t < 0.75f ? 1f : 1f - (t - 0.75f) / 0.25f;
 
-        p.setColor(0xFF0E1319);
+        p.setColor(Ui.BG);
         c.drawRect(0, 0, w, h, p);
 
         int alpha = (int) (255 * a);
@@ -69,7 +69,7 @@ public class Splash extends View {
 
         float bw = w * 0.30f, bh = Math.max(3f, h * 0.008f);
         bar.set((w - bw) / 2f, h * 0.80f, (w - bw) / 2f + bw * ease.getInterpolation(Math.min(1f, t * 1.15f)), h * 0.80f + bh);
-        p.setColor(0xFF1B2430);
+        p.setColor(Ui.CARD2);
         c.drawRoundRect(new RectF((w - bw) / 2f, h * 0.80f, (w + bw) / 2f, h * 0.80f + bh), bh / 2, bh / 2, p);
         p.setColor(Ui.ACC);
         p.setAlpha(alpha);

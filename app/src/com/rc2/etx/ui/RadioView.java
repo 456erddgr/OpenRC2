@@ -379,7 +379,7 @@ public final class RadioView extends View {
      */
     private void drawTop(Canvas c) {
         // 顶栏底：自上而下的深色渐变，比纯色更像"仪表盘面板"而不是"网页导航条"
-        ui.fillVGrad(c, topBar, 0xFF131A23, 0xFF0E131A);
+        ui.fillVGrad(c, topBar, Ui.CARD, Ui.BG);
         ui.line(c, 0, topH, getWidth(), topH, Ui.LINE, 1f);
 
         // 左侧品牌

@@ -17,13 +17,13 @@ import java.util.Locale;
  */
 public final class EdgeTxPanel extends Panel {
 
-    private static final int BG = 0xFF0A0F0C;
-    private static final int HEAD = 0xFF1C2B26;
-    private static final int LIMEGREEN = 0xFFA8E05F;
-    private static final int TEAL = 0xFF22C3A6;
-    private static final int TXT = 0xFFF0F4F0;
-    private static final int DIMT = 0xFF7E8C82;
-    private static final int WARN = 0xFFF0A030;
+    private static final int BG = Ui.BG;
+    private static final int HEAD = Ui.CARD;
+    private static final int LIMEGREEN = Ui.OK;
+    private static final int TEAL = Ui.OK;
+    private static final int TXT = Ui.TEXT;
+    private static final int DIMT = Ui.DIM;
+    private static final int WARN = Ui.WARN;
 
     private final RectF head = new RectF();
     private final RectF stickL = new RectF();
@@ -108,14 +108,14 @@ public final class EdgeTxPanel extends Panel {
     }
 
     private void drawStick(Canvas c, Ui ui, RectF b, float x, float y, String name, String vn, String hn) {
-        ui.card(c, b, 0xFF111A15);
-        ui.cardStroke(c, b, 0xFF2A3B31, 1f);
+        ui.card(c, b, Ui.CARD);
+        ui.cardStroke(c, b, Ui.CARD3, 1f);
         float cx = b.centerX();
         float cy = b.centerY();
         float s = b.width() * 0.40f;
         ui.line(c, cx - s, cy, cx + s, cy, Ui.CARD3, 1f);
         ui.line(c, cx, cy - s, cx, cy + s, Ui.CARD3, 1f);
-        ui.circle(c, cx, cy, b.width() * 0.16f, 0xFF233C31, true, 1f);
+        ui.circle(c, cx, cy, b.width() * 0.16f, Ui.CARD3, true, 1f);
         float dx = cx + x * s;
         float dy = cy - y * s;
         ui.line(c, cx, cy, dx, dy, TEAL, 1.4f);
@@ -136,7 +136,7 @@ public final class EdgeTxPanel extends Panel {
     }
 
     private void drawBars(Canvas c, Ui ui) {
-        ui.card(c, bars, 0xFF0F1611);
+        ui.card(c, bars, Ui.BG);
         int n = Radio.CH_COUNT;
         float w = bars.width() / n;
         int[] pctv = radio.pctSnapshot();
@@ -146,7 +146,7 @@ public final class EdgeTxPanel extends Panel {
             float top = bars.top + ui.d(8);
             float bot = bars.bottom - ui.d(20);
             float mid = (top + bot) / 2f;
-            ui.card(c, new RectF(x, top, x + bw, bot), 0xFF1B2620);
+            ui.card(c, new RectF(x, top, x + bw, bot), Ui.CARD);
             float p = Math.max(-1f, Math.min(1f, pctv[i] / 100f));
             if (p >= 0) {
                 ui.card(c, new RectF(x, mid - (mid - top) * p, x + bw, mid), TEAL);

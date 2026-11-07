@@ -59,12 +59,14 @@ public final class MixPanel extends Panel {
                     list.left + ui.d(4) + (col + 1) * cw - ui.d(4), list.top + ui.d(4) + (row + 1) * ch - ui.d(4));
             ChannelConfig cc = radio.model.ch[i];
             boolean on = (i == sel);
-            ui.card(c, tiles[i], on ? 0xFF26433C : Ui.CARD2);
-            if (on) ui.cardStroke(c, tiles[i], Ui.ACC, 1.5f);
-            ui.text(c, String.format("CH%02d", i + 1), tiles[i].left + ui.d(6), tiles[i].top + ui.d(15), 11,
-                    on ? Ui.ACC : Ui.DIM, true);
+            // 2026-11-07：选中态原来是墨绿色 0xFF26433C（和 DJI 蓝冲突），
+            // 改用「蓝的淡底 + 蓝描边」——同一色系的两个层次，不是换一种颜色。
+            ui.card(c, tiles[i], on ? Ui.ACC_TINT : Ui.CARD2);
+            if (on) ui.cardStroke(c, tiles[i], Ui.ACC, 1f);
+            ui.monoR(c, String.format("%02d", i + 1), tiles[i].left + ui.d(22), tiles[i].top + ui.d(15), 10,
+                    on ? Ui.ACC : Ui.FAINT);
             ui.text(c, cc.name, tiles[i].left + ui.d(6), tiles[i].top + ui.d(30), 12, Ui.TEXT, false);
-            ui.text(c, ChannelConfig.srcName(cc.src), tiles[i].left + ui.d(6), tiles[i].top + ui.d(44), 10, Ui.DIM, false);
+            ui.text(c, ChannelConfig.srcName(cc.src), tiles[i].left + ui.d(6), tiles[i].top + ui.d(44), 10, Ui.FAINT, false);
         }
 
         ChannelConfig cc = radio.model.ch[sel];

@@ -128,16 +128,17 @@ public class NativePanel extends Panel {
     /** 把 EdgeTX 的当前设置写回 radio.yml（真正落盘，不是按 RTN 碰运气）。 */
     public void flushSettings() {
         try {
-            // 2026-11-07 修「改设置重启就丢」：
-            // 原来只是连按 3 次 RTN 让上游"离开页面"——但 EdgeTX 的存档函数
-            // storageCheck() 只在关机流程里被调用，我们这套移植永远不关机，
-            // 所以那些改动一直在内存里，进程一被杀就没了。
-            // 现在先按 RTN 让页面提交编辑，再调原生 etxFlushStorage() 强制写盘。
-            for (int i = 0; i < 3; i++) {
-                queueKey(5);          // 5 = EXIT（返回/RTN）。见 native kKeyMap
-                tick();
-                Thread.sleep(40);
-            }
+            // 2026-11-07（第二版）修「改设置 / 改小组件，切走或重启就丢」：
+            //
+            // 上一版在这里连按 3 次 RTN，想让上游"离开页面 → 提交编辑"。
+            // 但这个方法挂在 onPause/onStop 上，于是：
+            //   用户正在「模型设置 → 屏幕」里摆小组件，只要切一次后台
+            //   （或收到通知、或被系统短暂压到后台），就被连按 3 次 RTN
+            //   踢出 3 层页面 —— 看起来就是"刚改的小组件全没了"。
+            //
+            // 而且按键根本没必要：EdgeTX 的编辑控件在用户确认的那一下就把值
+            // 写进 g_model / g_eeGeneral 并置了脏位（SET_DIRTY 宏），
+            // 落盘只需要调 storageCheck()。所以这里只做真正的事：落盘。
             int left = EtxNative.flushStorage();
             android.util.Log.i("ETX-Flush", "flushStorage left=" + left
                     + (left == 0 ? "（已全部落盘）" : "（仍有未写位，见日志）")

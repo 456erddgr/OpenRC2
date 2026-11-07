@@ -54,6 +54,18 @@ public final class EtxNative {
         try { return etxFlushStorage(); } catch (Throwable t) { return -1; }
     }
 
+    /**
+     * 2026-11-07 诊断：dump 内核内存里**当前生效**的屏幕/顶栏小组件配置。
+     * 与 SD 卡上 model1.yml 对照，就能判断「改了没进内存」还是「进了内存没写进文件」。
+     * 符号不存在（旧版 so）时返回空串。
+     */
+    private static native String etxWidgetDump();
+
+    public static String widgetDump() {
+        try { String s = etxWidgetDump(); return s == null ? "" : s; }
+        catch (Throwable t) { return ""; }
+    }
+
     /** C 路：取固件自己的每轴校准窗口。out[0]=min out[1]=mid out[2]=max。符号缺失时 false。 */
     public static native boolean axisCalib(int axis, int[] out);
 

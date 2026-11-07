@@ -86,14 +86,14 @@ public final class StickPanel extends Panel {
     private void drawStick(Canvas c, Ui ui, float cx, float cy, float rad, float x, float y,
                            String tag, String xn, String yn, float xv, float yv) {
         ui.circle(c, cx, cy, rad, Ui.LINE, true, 1.2f);
-        ui.circle(c, cx, cy, rad * 0.5f, 0xFF232B36, true, 1f);
+        ui.circle(c, cx, cy, rad * 0.5f, Ui.CARD2, true, 1f);
         ui.line(c, cx - rad, cy, cx + rad, cy, Ui.LINE, 1f);
         ui.line(c, cx, cy - rad, cx, cy + rad, Ui.LINE, 1f);
         float dx = cx + x * rad;
         float dy = cy - y * rad;
         ui.line(c, cx, cy, dx, dy, Ui.ACC, 1.5f);
         ui.circle(c, dx, dy, ui.d(11), Ui.ACC, false, 0);
-        ui.circle(c, dx, dy, ui.d(11), 0xFF0B0F14, true, 2f);
+        ui.circle(c, dx, dy, ui.d(11), Ui.BG, true, 2f);
         ui.textC(c, tag, cx, cy - rad - ui.d(4), 12, Ui.DIM, false);
         ui.textC(c, xn + " " + pct(xv), cx, cy + rad + ui.d(12), 11, Ui.DIM, true);
         ui.textC(c, yn + " " + pct(yv), cx, cy + rad + ui.d(24), 11, Ui.DIM, true);
@@ -109,8 +109,8 @@ public final class StickPanel extends Panel {
         for (int i = 0; i < 3; i++) {
             tmp.set(x0 + i * (b.width() * 0.2f), b.top + ui.d(4), x0 + (i + 1) * (b.width() * 0.2f) - ui.d(3), b.bottom - ui.d(4));
             boolean on = (i == idx);
-            ui.card(c, tmp, on ? Ui.ACC : 0xFF2A323D);
-            ui.textC(c, lab[i], tmp.centerX(), tmp.centerY() + ui.d(4.5f), 11, on ? 0xFF0B0F14 : Ui.DIM, on);
+            ui.card(c, tmp, on ? Ui.ACC : Ui.CARD2);
+            ui.textC(c, lab[i], tmp.centerX(), tmp.centerY() + ui.d(4.5f), 11, on ? Ui.BG : Ui.DIM, on);
         }
     }
 
@@ -120,7 +120,7 @@ public final class StickPanel extends Panel {
         float x0 = b.left + b.width() * 0.30f;
         float x1 = b.right - ui.d(10);
         tmp.set(x0, b.centerY() - ui.d(5), x1, b.centerY() + ui.d(5));
-        ui.card(c, tmp, 0xFF2A323D);
+        ui.card(c, tmp, Ui.CARD2);
         float t = (v + 1f) * 0.5f;
         float fx = x0 + t * (x1 - x0);
         tmp.set(x0, b.centerY() - ui.d(5), fx, b.centerY() + ui.d(5));
@@ -141,7 +141,7 @@ public final class StickPanel extends Panel {
             float top = bars.top + ui.d(14);
             float bot = bars.bottom - ui.d(14);
             float mid = (top + bot) / 2f;
-            ui.card(c, new RectF(x, top, x + bw, bot), 0xFF232B36);
+            ui.card(c, new RectF(x, top, x + bw, bot), Ui.CARD2);
             float p = Math.max(-1f, Math.min(1f, pctv[i] / 100f));
             if (p >= 0) {
                 ui.card(c, new RectF(x, mid - (mid - top) * p, x + bw, mid), Ui.ACC);
