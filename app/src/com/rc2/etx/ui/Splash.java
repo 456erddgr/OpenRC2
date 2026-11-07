@@ -63,7 +63,7 @@ public class Splash extends View {
         c.drawText("OpenRC2", w / 2f, h * 0.66f, p);
 
         p.setFakeBoldText(false);
-        p.setColor(0xFFF5B942);
+        p.setColor(Ui.ACC);
         p.setTextSize(h * 0.038f);
         c.drawText("开源遥控 · EdgeTX 2.12.2", w / 2f, h * 0.72f, p);
 
@@ -71,7 +71,7 @@ public class Splash extends View {
         bar.set((w - bw) / 2f, h * 0.80f, (w - bw) / 2f + bw * ease.getInterpolation(Math.min(1f, t * 1.15f)), h * 0.80f + bh);
         p.setColor(0xFF1B2430);
         c.drawRoundRect(new RectF((w - bw) / 2f, h * 0.80f, (w + bw) / 2f, h * 0.80f + bh), bh / 2, bh / 2, p);
-        p.setColor(0xFFF5B942);
+        p.setColor(Ui.ACC);
         p.setAlpha(alpha);
         c.drawRoundRect(bar, bh / 2, bh / 2, p);
 

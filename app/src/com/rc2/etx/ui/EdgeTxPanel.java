@@ -83,7 +83,7 @@ public final class EdgeTxPanel extends Panel {
         float[] auxVal = {radio.input.aux1, radio.input.aux2, radio.input.aux3, radio.input.aux4};
         for (int i = 0; i < 4; i++) {
             auxR[i].set(rx, top + i * (rowH + ui.d(4)), rx + rightW, top + i * (rowH + ui.d(4)) + rowH);
-            ui.card(c, auxR[i], 0xFF141E19);
+            ui.card(c, auxR[i], Ui.CARD);
             ui.text(c, auxName[i], auxR[i].left + ui.d(10), auxR[i].centerY() + ui.d(6), 15, TXT, true);
             int st = auxVal[i] > 0.35f ? 2 : (auxVal[i] < -0.35f ? 0 : 1);
             String[] lab = {"DN", "MID", "UP"};
@@ -93,7 +93,7 @@ public final class EdgeTxPanel extends Panel {
             float bw = ui.d(56);
             RectF tr = new RectF(auxR[i].right - ui.d(90) - bw, auxR[i].centerY() - ui.d(4),
                     auxR[i].right - ui.d(90), auxR[i].centerY() + ui.d(4));
-            ui.card(c, tr, 0xFF243028);
+            ui.card(c, tr, Ui.CARD2);
             ui.card(c, new RectF(tr.left, tr.top, tr.left + bw * frac, tr.bottom), col);
         }
         float ky = auxR[3].bottom + ui.d(8);
@@ -113,8 +113,8 @@ public final class EdgeTxPanel extends Panel {
         float cx = b.centerX();
         float cy = b.centerY();
         float s = b.width() * 0.40f;
-        ui.line(c, cx - s, cy, cx + s, cy, 0xFF2E4237, 1f);
-        ui.line(c, cx, cy - s, cx, cy + s, 0xFF2E4237, 1f);
+        ui.line(c, cx - s, cy, cx + s, cy, Ui.CARD3, 1f);
+        ui.line(c, cx, cy - s, cx, cy + s, Ui.CARD3, 1f);
         ui.circle(c, cx, cy, b.width() * 0.16f, 0xFF233C31, true, 1f);
         float dx = cx + x * s;
         float dy = cy - y * s;
@@ -126,11 +126,11 @@ public final class EdgeTxPanel extends Panel {
     }
 
     private void drawKnob(Canvas c, Ui ui, RectF b, String name, float v) {
-        ui.card(c, b, 0xFF141E19);
+        ui.card(c, b, Ui.CARD);
         ui.text(c, name, b.left + ui.d(10), b.centerY() + ui.d(6), 15, TXT, true);
         float t = (v + 1f) * 0.5f;
         RectF tr = new RectF(b.left + ui.d(46), b.centerY() - ui.d(5), b.right - ui.d(56), b.centerY() + ui.d(5));
-        ui.card(c, tr, 0xFF243028);
+        ui.card(c, tr, Ui.CARD2);
         ui.card(c, new RectF(tr.left, tr.top, tr.left + tr.width() * t, tr.bottom), LIMEGREEN);
         ui.textR(c, pct(v), b.right - ui.d(10), b.centerY() + ui.d(6), 13, TXT, true);
     }

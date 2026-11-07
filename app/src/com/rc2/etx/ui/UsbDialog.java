@@ -33,7 +33,7 @@ public class UsbDialog extends Dialog {
     private static final int C_LINE = 0xFF2A3441;
     private static final int C_TXT = 0xFFE9EEF5;
     private static final int C_DIM = 0xFF8A96A6;
-    private static final int C_ACC = 0xFFF5B942;
+    private static final int C_ACC = Ui.ACC;
     private static final int C_WARN = 0xFFE0653B;
 
     private final float d;
@@ -107,7 +107,7 @@ public class UsbDialog extends Dialog {
                 p.setColor(hot ? 0xFF23303D : 0xFF1A212B);
                 c.drawRoundRect(r, dp(12), dp(12), p);
                 // 左侧色条
-                p.setColor(i == 0 ? 0xFF2DD4BF : (i == 1 ? C_ACC : (i == 3 ? C_WARN : 0xFF5AA9FF)));
+                p.setColor(i == 0 ? Ui.OK : (i == 1 ? C_ACC : (i == 3 ? C_WARN : Ui.BLUE)));
                 c.drawRoundRect(new RectF(r.left + dp(8), r.top + dp(10), r.left + dp(11), r.bottom - dp(10)), dp(2), dp(2), p);
                 tp.setColor(C_TXT); tp.setTextSize(dp(12.5f)); tp.setFakeBoldText(true);
                 c.drawText(TITLE[i], r.left + dp(18), r.top + dp(23), tp);

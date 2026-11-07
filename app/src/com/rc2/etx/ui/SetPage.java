@@ -24,7 +24,7 @@ public class SetPage extends Panel {
                                    "推哪根认哪根，不用选反向",
                                    "导出 sd_probe / hid / native"};
     private final String[] val = {"关", "自动", "v15", "中", "未校准", "点此导出"};
-    private final int[] accent = {0xFF2DD4BF, 0xFFF5B942, 0xFFF5B942, 0xFF2DD4BF, 0xFFF5B942, 0xFF5AA9FF};
+    private final int[] accent = {Ui.OK, Ui.ACC, Ui.ACC, Ui.OK, Ui.ACC, Ui.BLUE};
     private OnCard cb;
     private int pressed = -1, active = -1;
 
@@ -44,35 +44,37 @@ public class SetPage extends Panel {
     @Override public void draw(Canvas c, Ui ui, RectF a) {
         float w = a.width(), h = a.height();
         fill.setStyle(Paint.Style.FILL);
-        fill.setColor(0xFF0E1319);
+        fill.setColor(Ui.BG);
         c.drawRect(a, fill);
-        put(c, "设置", a.left + w * 0.035f, a.top + h * 0.20f, h * 0.095f, 0xFFF2F5F8, true);
-        put(c, "全部可视化，点卡片就能改", a.left + w * 0.035f, a.top + h * 0.265f, h * 0.048f, 0xFF8A97A6, false);
+        put(c, "设置", a.left + w * 0.035f, a.top + h * 0.20f, h * 0.095f, Ui.TEXT, true);
+        put(c, "全部可视化，点卡片就能改", a.left + w * 0.035f, a.top + h * 0.265f, h * 0.048f,
+                Ui.FAINT, false);
         float pad = w * 0.035f, top = a.top + h * 0.32f, gap = h * 0.022f;
         float ch = (h * 0.60f - gap * (N - 1)) / (float) N, cw = w - pad * 2;
-        float rad = h * 0.045f;
+        float rad = ui.d(Ui.R_MD);
         for (int i = 0; i < N; i++) {
             float y = top + i * (ch + gap);
             card[i].set(a.left + pad, y, a.left + pad + cw, y + ch);
             fill.setStyle(Paint.Style.FILL);
-            fill.setColor(pressed == i ? 0xFF1F2733 : 0xFF151A22);
+            fill.setColor(pressed == i ? Ui.CARD2 : Ui.CARD);
             c.drawRoundRect(card[i], rad, rad, fill);
-            path.reset();
-            path.addRoundRect(new RectF(card[i].left, card[i].top, card[i].left + w * 0.008f, card[i].bottom),
-                    new float[]{rad, rad, rad, rad, 0, 0, 0, 0}, Path.Direction.CW);
-            fill.setColor(accent[i]);
-            c.drawPath(path, fill);
-            float x = card[i].left + pad, base = card[i].top + ch * 0.44f;
-            put(c, head[i], x, base, ch * 0.30f, 0xFFF2F5F8, true);
-            put(c, desc[i], x, base + ch * 0.30f, ch * 0.22f, 0xFF8A97A6, false);
+            // 2026-11-07：原来左侧一条 8px 宽的彩色竖条（accident 式的"侧边色块"），
+            // 设计规范明确禁止 —— 那是廉价装饰，还把卡片切成两半。
+            // 改成一个 6dp 的小圆点：只承担"这是哪一类"的语义，不抢视线。
+            float cy = card[i].centerY();
+            ui.dot(c, card[i].left + pad * 0.62f, cy, ui.d(2.6f), accent[i]);
+
+            float x = card[i].left + pad + ui.d(16), base = card[i].top + ch * 0.44f;
+            put(c, head[i], x, base, ch * 0.30f, Ui.TEXT, true);
+            put(c, desc[i], x, base + ch * 0.30f, ch * 0.22f, Ui.FAINT, false);
             String v = val[i];
             txt.setTextSize(ch * 0.26f); txt.setFakeBoldText(true);
             float tw = txt.measureText(v);
             RectF pill = new RectF(card[i].right - pad - tw - w * 0.06f, card[i].top + ch * 0.26f,
                     card[i].right - pad, card[i].bottom - ch * 0.26f);
-            fill.setColor(0xFF232B37);
+            fill.setColor(pressed == i ? Ui.CARD3 : Ui.CARD2);
             c.drawRoundRect(pill, pill.height() / 2f, pill.height() / 2f, fill);
-            txt.setColor(0xFFF5B942); txt.setTextAlign(Paint.Align.CENTER);
+            txt.setColor(Ui.ACC); txt.setTextAlign(Paint.Align.CENTER);
             c.drawText(v, pill.centerX(), pill.centerY() + ch * 0.09f, txt);
             txt.setTextAlign(Paint.Align.LEFT); txt.setFakeBoldText(false);
         }

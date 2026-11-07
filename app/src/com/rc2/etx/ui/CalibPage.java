@@ -198,18 +198,18 @@ public class CalibPage extends Panel {
             p.setColor(done ? 0xFF17351F : 0xFF151A22);
             c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
             p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(h * 0.004f);
-            p.setColor(done ? 0xFF3DDC84 : (bnd ? 0xFFF5B942 : 0xFF2A3442));
+            p.setColor(done ? Ui.OK : (bnd ? Ui.ACC : Ui.LINE));
             c.drawRoundRect(r, h * 0.02f, h * 0.02f, p); p.setStyle(Paint.Style.FILL);
             txt(c, NAME[i], r.centerX(), r.top + ch * 0.40f, h * 0.042f,
-                    bnd ? 0xFFF2F5F8 : 0xFF8A97A6, true);
+                    bnd ? Ui.TEXT : Ui.DIM, true);
             String sub = done ? "满行程 ✓" : (bnd ? String.format(java.util.Locale.US, "%d%%", (int) (peak[i] * 100)) : "未绑定");
             txt(c, sub, r.centerX(), r.top + ch * 0.78f, h * 0.030f,
-                    done ? 0xFF3DDC84 : 0xFF8A97A6, false);
+                    done ? Ui.OK : Ui.DIM, false);
             // 进度条：本轴到达峰值比例
             RectF pr = new RectF(r.left + r.width() * 0.06f, r.bottom - ch * 0.26f,
                     r.left + r.width() * 0.06f + r.width() * 0.88f * Math.min(1f, peak[i] / PEAK),
                     r.bottom - ch * 0.18f);
-            p.setColor(done ? 0xFF3DDC84 : 0xFFF5B942);
+            p.setColor(done ? Ui.OK : Ui.ACC);
             c.drawRoundRect(pr, pr.height() * 0.5f, pr.height() * 0.5f, p);
         }
 
@@ -221,16 +221,16 @@ public class CalibPage extends Panel {
 
         // 文案
         String big = step <= 1 ? "第 1 步 · 认轴" : (step == 2 ? "第 2 步 · 转圈推到顶" : (step == 3 ? "第 3 步 · 全部回中" : "已完成"));
-        txt(c, big, a.centerX(), a.top + h * 0.19f, h * 0.050f, 0xFFF5B942, true);
-        txt(c, hint, a.centerX(), a.top + h * 0.255f, h * 0.034f, 0xFFF2F5F8, false);
+        txt(c, big, a.centerX(), a.top + h * 0.19f, h * 0.050f, Ui.ACC, true);
+        txt(c, hint, a.centerX(), a.top + h * 0.255f, h * 0.034f, Ui.TEXT, false);
         if (step == 3 && cenT > 0) {
             txt(c, String.format(java.util.Locale.US, "%.1f / 1.5 秒", (System.currentTimeMillis() - cenT) / 1000f),
-                    a.centerX(), a.top + h * 0.335f, h * 0.045f, 0xFF3DDC84, true);
+                    a.centerX(), a.top + h * 0.335f, h * 0.045f, Ui.OK, true);
         }
         if (step == 2) {
             txt(c, String.format(java.util.Locale.US, "LX %+.2f  LY %+.2f    RX %+.2f  RY %+.2f",
                     ax(0), ax(1), ax(2), ax(3)),
-                    a.centerX(), a.top + h * 0.60f, h * 0.032f, 0xFF8A97A6, false);
+                    a.centerX(), a.top + h * 0.60f, h * 0.032f, Ui.DIM, false);
         }
 
         pumpTcal();
@@ -249,14 +249,14 @@ public class CalibPage extends Panel {
 
     private void disk(Canvas c, float cx, float cy, float rad, int axV, int axH, String label) {
         Calib cal = radio.calib;
-        p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(rad * 0.03f); p.setColor(0xFF2A3442);
+        p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(rad * 0.03f); p.setColor(Ui.LINE);
         c.drawCircle(cx, cy, rad, p);
         c.drawCircle(cx, cy, rad * 0.5f, p);
         c.drawLine(cx - rad, cy, cx + rad, cy, p);
         c.drawLine(cx, cy - rad, cx, cy + rad, p);
-        p.setStyle(Paint.Style.FILL); p.setColor(0xFFF5B942);
+        p.setStyle(Paint.Style.FILL); p.setColor(Ui.ACC);
         c.drawCircle(cx + ax(axH) * rad, cy - ax(axV) * rad, rad * 0.14f, p);
-        p.setColor(0xFF8A97A6); p.setTextSize(rad * 0.30f);
+        p.setColor(Ui.DIM); p.setTextSize(rad * 0.30f);
         p.setTextAlign(Paint.Align.CENTER);
         c.drawText(label, cx, cy + rad * 1.55f, p);
         p.setTextAlign(Paint.Align.LEFT);
@@ -316,10 +316,10 @@ public class CalibPage extends Panel {
 
     private void btn(Canvas c, RectF r, String s, boolean primary, float h) {
         p.setStyle(Paint.Style.FILL);
-        p.setColor(primary ? 0xFFF5B942 : 0xFF1B2430);
+        p.setColor(primary ? Ui.ACC : 0xFF1B2430);
         c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
         p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(h * 0.004f);
-        p.setColor(primary ? 0xFFF5B942 : 0xFF39506B);
+        p.setColor(primary ? Ui.ACC : 0xFF39506B);
         c.drawRoundRect(r, h * 0.02f, h * 0.02f, p);
         p.setStyle(Paint.Style.FILL);
         txt(c, s, r.centerX(), r.centerY() + h * 0.018f, h * 0.042f,

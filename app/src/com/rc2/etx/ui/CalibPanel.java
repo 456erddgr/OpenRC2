@@ -309,7 +309,7 @@ public final class CalibPanel extends Panel {
             float span = Math.min(1f, (mxRaw[ax] - mnRaw[ax]) / 1.35f);
             RectF bar = new RectF(a.left + ui.d(16), by + i * ui.d(20), a.left + ui.d(16) + bw, by + i * ui.d(20) + ui.d(13));
             p.setColor(0xFF18202B); c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
-            p.setColor(span > 0.92f ? 0xFF5AD1A5 : (span > 0.7f ? 0xFFF5B942 : 0xFFE0653B));
+            p.setColor(span > 0.92f ? 0xFF5AD1A5 : (span > 0.7f ? Ui.ACC : 0xFFE0653B));
             bar.right = bar.left + bw * span;
             c.drawRoundRect(bar, ui.d(6), ui.d(6), p);
             p.setColor(0xFFC7D3DF);
@@ -322,9 +322,9 @@ public final class CalibPanel extends Panel {
             RectF ring = new RectF(a.centerX() - ui.d(22), a.bottom - ui.d(70), a.centerX() + ui.d(22), a.bottom - ui.d(26));
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(ui.d(4));
-            p.setColor(0xFF2A3442);
+            p.setColor(Ui.LINE);
             c.drawArc(ring, 0, 360, false, p);
-            p.setColor(0xFFF5B942);
+            p.setColor(Ui.ACC);
             c.drawArc(ring, -90, 360 * t, false, p);
             p.setStyle(Paint.Style.FILL);
         }
