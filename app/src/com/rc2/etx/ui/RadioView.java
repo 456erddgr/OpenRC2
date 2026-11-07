@@ -244,7 +244,10 @@ public final class RadioView extends View {
         for (int i = 0; i < panels.length; i++) {
             tabR[i].set(x0 + i * tabW, ui.d(6), x0 + (i + 1) * tabW - ui.d(6), topH - ui.d(6));
         }
-        fullR.set(w - ui.d(86), content.top + ui.d(40), w - ui.d(8), content.top + ui.d(68));
+        // 2026-11-07：「全屏」按钮原来浮在内容区右上（content.top+40），
+        // 会盖住通道页顶部统计卡的数值。现在挪进顶栏右侧的空白带（topH 内），
+        // 既不遮内容，也和页签在同一视觉层。
+        fullR.set(w - ui.d(62), ui.d(6), w - ui.d(8), ui.d(26));
         for (Panel p : panels) p.layout(content);
     }
 
@@ -272,8 +275,10 @@ public final class RadioView extends View {
         }
         drawTop(c);
         panels[page].draw(c, ui, content);
-        ui.card(c, fullR, 0xCC20312C);
-        ui.textC(c, "全屏", fullR.centerX(), fullR.centerY() + ui.d(5), 12, Ui.ACC, true);
+        // 全屏：描边胶囊（DJI 的 secondary pill），不抢主动作
+        ui.cardR(c, fullR, Ui.PILL, 0x00000000);
+        ui.cardStrokeR(c, fullR, Ui.PILL, Ui.LINE, 1f);
+        ui.textC(c, "全屏", fullR.centerX(), fullR.centerY() + ui.d(4), 10, Ui.DIM, false);
     }
 
     /** 页签图标：用简单几何图形，不依赖图片资源。 */
@@ -363,30 +368,61 @@ public final class RadioView extends View {
         return 0;
     }
 
+    /**
+     * 顶栏（2026-11-07 重做）。
+     *
+     * 设计取向照 DJI：**信息分层靠字重和字距，不靠色块**。
+     * 所以这里不画"选中页签的绿底方块"，改成：
+     *  - 一条跟着当前页滑动的下划线（dj 蓝），滑动用 easeOutCubic；
+     *  - 选中页签的字变亮变粗，图标同色；
+     *  - 右侧状态用等宽数字，避免 Hz/帧数跳动时左右抖。
+     */
     private void drawTop(Canvas c) {
-        ui.fill(c, topBar, 0xFF12171E);
+        // 顶栏底：自上而下的深色渐变，比纯色更像"仪表盘面板"而不是"网页导航条"
+        ui.fillVGrad(c, topBar, 0xFF131A23, 0xFF0E131A);
         ui.line(c, 0, topH, getWidth(), topH, Ui.LINE, 1f);
-        ui.text(c, "OpenRC2", ui.d(10), topH * 0.60f, 15, Ui.ACC, true);
-        ui.text(c, "开源遥控 · 16CH", ui.d(10), topH * 0.60f + ui.d(13), 9, Ui.DIM, false);
+
+        // 左侧品牌
+        ui.textTracked(c, "OpenRC2", ui.d(10), topH * 0.58f, 15, Ui.TEXT, true, -0.02f);
+        ui.text(c, "开源遥控 · 16CH", ui.d(10), topH * 0.58f + ui.d(13), 9, Ui.FAINT, false);
+
+        // 页签
         for (int i = 0; i < panels.length; i++) {
             boolean on = (i == page);
-            if (on) ui.card(c, tabR[i], 0xFF1F3A34);
-            float icx = tabR[i].centerX() - ui.d(24);
+            float icx = tabR[i].centerX() - ui.d(26);
             tabIcon(c, i, icx, tabR[i].centerY(), on);
             ui.text(c, panels[i].title(), icx + ui.d(12), tabR[i].centerY() + ui.d(5), 13,
-                    on ? Ui.ACC : Ui.DIM, on);
+                    on ? Ui.TEXT : Ui.DIM, on);
         }
+
+        // 滑动下划线：从上一个页签的位置缓动到当前页签
+        float targetX = tabR[page].centerX();
+        if (tabXAnim == 0f) tabXAnim = targetX;
+        tabXAnim = Ui.lerp(tabXAnim, targetX, 0.35f);
+        if (Math.abs(tabXAnim - targetX) < 0.5f) tabXAnim = targetX;
+        float halfW = ui.d(16);
+        RectF ind = tabIndR;
+        ind.set(tabXAnim - halfW, topH - ui.d(3), tabXAnim + halfW, topH - ui.d(1));
+        ui.cardR(c, ind, Ui.R_SM, Ui.ACC);
+
+        // 右侧状态：分两行，上排输出、下排链路
         OutputSink s = radio.sink();
         String st = s.name() + (s.isOpen() ? " 开 " : " 关 ") + s.frames() + "帧";
-        ui.textR(c, st, getWidth() - ui.d(10), topH * 0.42f, 11, s.isOpen() ? Ui.ACC : Ui.WARN, false);
+        // 右边界让出 72dp 给「全屏」胶囊按钮，否则文字被盖住
+        ui.textR(c, st, getWidth() - ui.d(72), topH * 0.42f, 11,
+                s.isOpen() ? Ui.OK : Ui.WARN, false);
         boolean dumlOk = radio.isDumlOn() && radio.duml.connected;
         String src = !radio.isDumlOn() ? "触摸"
                 : (dumlOk ? "机内" + radio.duml.stickHz + "Hz" : "机内连…");
         String st2 = (radio.isRunning() ? radio.hz + "Hz" : "停")
                 + " 抖" + radio.maxGapMs + "ms " + src;
-        ui.textR(c, st2, getWidth() - ui.d(10), topH * 0.42f + ui.d(13), 10,
-                (radio.isDumlOn() && !dumlOk) ? Ui.WARN : Ui.DIM, false);
+        ui.textR(c, st2, getWidth() - ui.d(72), topH * 0.42f + ui.d(13), 10,
+                (radio.isDumlOn() && !dumlOk) ? Ui.WARN : Ui.FAINT, false);
     }
+
+    /** 页签下划线的当前 x（做缓动用）。 */
+    private float tabXAnim;
+    private final RectF tabIndR = new RectF();
 
     /** C 路：把外接手柄的轴事件喂给 GamepadReader（只读，不拦截）。 */
     @Override
